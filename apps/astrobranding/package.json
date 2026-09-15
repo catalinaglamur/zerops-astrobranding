@@ -1,0 +1,13 @@
+{
+  "name": "astrobranding",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "start": "bun run src/server.ts",
+    "build": "echo 'Build complete'"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  }
+}

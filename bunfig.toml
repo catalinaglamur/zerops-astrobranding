@@ -1,0 +1,7 @@
+[install]
+exact = true
+prefer = "online"
+
+[test]
+root = "."
+coverage = false

@@ -1,0 +1,19 @@
+{
+  "name": "zerops-astrobranding",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun --filter astrobranding dev",
+    "build": "bun --filter astrobranding build",
+    "start": "bun --filter astrobranding start",
+    "check": "bun run --filter '*' check"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3"
+  }
+}
