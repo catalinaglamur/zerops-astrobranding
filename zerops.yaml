@@ -1,8 +1,7 @@
 zerops:
   - setup: astrobranding
     build:
-      base: bun@1.3.9
-      os: ubuntu
+      base: ubuntu/bun@1.3.9
       buildCommands:
         - bun install
       deployFiles:
@@ -16,8 +15,7 @@ zerops:
           port: 3000
           path: /health
     run:
-      base: bun@1.3.9
-      os: ubuntu
+      base: ubuntu/bun@1.3.9
       ports:
         - port: 3000
           httpSupport: true
