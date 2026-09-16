@@ -118,7 +118,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
   <script>
     interface GatewayInfo {
-      id: "dlocalgo" | "wompi" | "epayco";
+      id: "dlocalgo" | "wompi" | "epayco" | "stripe" | "mercadopago";
       name: string;
       currencies: string[];
       supportedMethods: string[];
@@ -126,7 +126,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     }
 
     let activeGateways: GatewayInfo[] = [];
-    let selectedGateway: "dlocalgo" | "wompi" | "epayco" = "dlocalgo";
+    let selectedGateway: "dlocalgo" | "wompi" | "epayco" | "stripe" | "mercadopago" = "stripe";
 
     const baseAmountInput = document.getElementById("baseAmount") as HTMLInputElement;
     const orderBumpCheckbox = document.getElementById("orderBumpCheckbox") as HTMLInputElement;
@@ -154,13 +154,13 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       try {
         const res = await fetch("/api/v1/payments/gateways");
         if (!res.ok) throw new Error("Error consultando pasarelas");
-        const data = await res.json() as { gateways: GatewayInfo[]; defaultGateway?: "dlocalgo" | "wompi" | "epayco" };
+        const data = await res.json() as { gateways: GatewayInfo[]; defaultGateway?: "dlocalgo" | "wompi" | "epayco" | "stripe" | "mercadopago" };
         activeGateways = data.gateways;
 
         if (activeGateways.length === 0) {
-          // Fallback a dLocal Go en modo demo/sandbox
           activeGateways = [
-            { id: "dlocalgo", name: "dLocal Go (LatAm & Tarjetas)", currencies: ["USD", "COP"], supportedMethods: ["cards", "pse"], isDefault: true }
+            { id: "stripe", name: "Stripe (Apple Pay & Tarjetas)", currencies: ["USD", "EUR"], supportedMethods: ["cards", "apple_pay", "google_pay"], isDefault: true },
+            { id: "dlocalgo", name: "dLocal Go (LatAm & Tarjetas)", currencies: ["USD", "COP"], supportedMethods: ["cards", "pse"], isDefault: false },
           ];
         }
 
@@ -169,11 +169,13 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       } catch (err) {
         console.warn("[Payments] Fallback local para pasarelas:", err);
         activeGateways = [
-          { id: "dlocalgo", name: "dLocal Go", currencies: ["USD"], supportedMethods: ["cards"], isDefault: true },
+          { id: "stripe", name: "Stripe (Apple Pay)", currencies: ["USD"], supportedMethods: ["cards", "apple_pay"], isDefault: true },
+          { id: "dlocalgo", name: "dLocal Go", currencies: ["USD"], supportedMethods: ["cards"], isDefault: false },
           { id: "wompi", name: "Wompi (Bancolombia/PSE)", currencies: ["COP"], supportedMethods: ["pse", "bancolombia"], isDefault: false },
           { id: "epayco", name: "ePayco (DaviPlata/PSE)", currencies: ["COP", "USD"], supportedMethods: ["pse", "daviplata"], isDefault: false },
+          { id: "mercadopago", name: "Mercado Pago (Pix/PSE)", currencies: ["COP", "BRL", "MXN"], supportedMethods: ["pix", "cards"], isDefault: false },
         ];
-        selectedGateway = "dlocalgo";
+        selectedGateway = "stripe";
         renderGateways();
       }
     }

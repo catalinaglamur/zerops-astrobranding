@@ -10,15 +10,29 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const filePath = process.argv[2] || "/var/www/baiosfera/0ZEROPS-AGY/0zcp-123/apis/baiosfera_freellm.md";
+const defaultCandidates = [
+  process.argv[2],
+  process.env.KEYS_FILE,
+  "/var/www/keys.md",
+  "/var/www/.env",
+].filter(Boolean);
+
+let filePath = "";
+for (const cand of defaultCandidates) {
+  if (cand && fs.existsSync(cand)) {
+    filePath = cand;
+    break;
+  }
+}
+
 const targetUrl = process.argv[3] || process.env.FREELLMAPI_URL || "http://localhost:3001";
 
-console.log(`\n==> [FreeLLMAPI Seeder] Reading credentials from: ${filePath}`);
-
-if (!fs.existsSync(filePath)) {
-  console.error(`[Error] Credential file not found: ${filePath}`);
-  process.exit(1);
+if (!filePath) {
+  console.log(`[Info] No credentials file supplied or found. FreeLLMAPI operates via environment variables.`);
+  process.exit(0);
 }
+
+console.log(`\n==> [FreeLLMAPI Seeder] Reading credentials from: ${filePath}`);
 
 const content = fs.readFileSync(filePath, "utf-8");
 

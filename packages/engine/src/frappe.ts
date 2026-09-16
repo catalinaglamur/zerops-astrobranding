@@ -11,7 +11,7 @@ export class FrappeClient {
   private apiSecret: string;
 
   constructor() {
-    this.url = (process.env.FRAPPE_URL || "https://frappe.baiosfera.com").replace(/\/$/, "");
+    this.url = (process.env.FRAPPE_URL || "").replace(/\/$/, "");
     this.apiKey = process.env.FRAPPE_API_KEY || "";
     this.apiSecret = process.env.FRAPPE_API_SECRET || "";
   }

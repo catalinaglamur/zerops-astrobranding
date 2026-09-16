@@ -2,6 +2,8 @@ import type { PaymentGatewayDriver } from "./types";
 import { DLocalGoDriver } from "./dlocalgo";
 import { WompiDriver } from "./wompi";
 import { EPaycoDriver } from "./epayco";
+import { StripeDriver } from "./stripe";
+import { MercadoPagoDriver } from "./mercadopago";
 import type {
   PaymentGatewayId,
   ActiveGatewayInfo,
@@ -18,6 +20,8 @@ export class PaymentGatewayRegistry {
     this.register(new DLocalGoDriver());
     this.register(new WompiDriver());
     this.register(new EPaycoDriver());
+    this.register(new StripeDriver());
+    this.register(new MercadoPagoDriver());
   }
 
   register(driver: PaymentGatewayDriver): void {

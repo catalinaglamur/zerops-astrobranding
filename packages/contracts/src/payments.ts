@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const PaymentGatewayIdSchema = z.enum(["dlocalgo", "wompi", "epayco"]);
+export const PaymentGatewayIdSchema = z.enum(["dlocalgo", "wompi", "epayco", "stripe", "mercadopago"]);
 export type PaymentGatewayId = z.infer<typeof PaymentGatewayIdSchema>;
 
 export const ActiveGatewayInfoSchema = z.object({

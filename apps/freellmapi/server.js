@@ -119,24 +119,45 @@ function loadPersistedKeys(): void {
   }
 }
 
-function persistKeys(): void {
-  try {
-    const list = Array.from(providers.values()).map((p) => ({
-      id: p.id,
-      name: p.name,
-      baseUrl: p.baseUrl,
-      apiKey: p.apiKey,
-      defaultModel: p.defaultModel,
-      models: p.models,
-    }));
-    fs.writeFileSync(DB_PATH, JSON.stringify(list, null, 2), "utf-8");
-    console.log(`[FreeLLMAPI] Persisted ${list.length} provider credentials to ${DB_PATH}`);
-  } catch (err) {
-    console.error(`[FreeLLMAPI] Failed to persist keys to ${DB_PATH}:`, err);
+function loadFromEnvironment(): void {
+  const envMap: Record<string, string | undefined> = {
+    cerebras: process.env.CEREBRAS_API_KEY,
+    groq: process.env.GROQ_API_KEY,
+    opencode: process.env.OPENCODE_API_KEY,
+    ollama: process.env.OLLAMA_API_KEY,
+    openrouter: process.env.OPENROUTER_API_KEY,
+    huggingface: process.env.HUGGINGFACE_API_KEY,
+    aisa: process.env.AISA_API_KEY,
+  };
+
+  let count = 0;
+  for (const [id, key] of Object.entries(envMap)) {
+    if (key && !providers.has(id)) {
+      const def = providerDefaults[id];
+      if (def) {
+        providers.set(id, {
+          id,
+          name: def.name,
+          baseUrl: def.baseUrl,
+          apiKey: key,
+          defaultModel: def.defaultModel,
+          models: def.models,
+          cooldownUntil: 0,
+          errorCount: 0,
+          successCount: 0,
+          rateLimit429Count: 0,
+        });
+        count++;
+      }
+    }
+  }
+  if (count > 0) {
+    console.log(`[FreeLLMAPI] Auto-discovered ${count} providers from environment variables`);
   }
 }
 
 loadPersistedKeys();
+loadFromEnvironment();
 
 // Health check endpoint
 app.get("/api/ping", (req, res) => {

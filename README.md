@@ -70,10 +70,10 @@ The application features a pluggable, environment-driven payment strategy patter
 `cerebras` $\to$ `groq` $\to$ `opencode` $\to$ `ollama` $\to$ `openrouter` $\to$ `huggingface` $\to$ `aisa`.
 If any upstream provider returns HTTP 429, it enters a 60-second cooldown and the request automatically fails over to the next healthy candidate without dropping user requests.
 
-### CLI Seeding from Markdown Credential Files
-To seed or update API keys into FreeLLMAPI from a markdown vault file:
+### CLI Seeding from Markdown Credential Files (Optional)
+FreeLLMAPI automatically discovers keys from `process.env` (synced via `unisetup.sh`). If you want to seed or refresh keys manually from a custom markdown file:
 ```bash
-node scripts/seed-freellm-keys.mjs /var/www/baiosfera/0ZEROPS-AGY/0zcp-123/apis/baiosfera_freellm.md
+node scripts/seed-freellm-keys.mjs /var/www/keys.md
 ```
 
 ---
