@@ -1,6 +1,6 @@
 {
   "$schema": "https://www.getbifrost.ai/schema",
-  "version": "2.0.0",
+  "version": 2,
   "server": {
     "port": 8080,
     "host": "0.0.0.0"
@@ -10,27 +10,83 @@
     "address": "valkey:6379",
     "dimension": 1536
   },
-  "virtual_keys": [
-    {
-      "id": "vk-production-main",
-      "name": "Production Sovereign Key",
-      "rate_limits": {
-        "requests_per_minute": 120
-      },
-      "models": ["*"]
-    }
-  ],
-  "routing": [
-    {
-      "name": "primary-freellmapi-routing",
-      "cel_expression": "true",
-      "targets": [
+  "providers": {
+    "freellmapi": {
+      "keys": [
         {
-          "provider": "freellmapi",
-          "base_url": "http://freellmapi:3001/v1",
+          "name": "freellmapi-primary-pool",
+          "value": "env.FREELLMAPI_UNIFIED_KEY",
+          "models": ["*"],
           "weight": 1.0
+        }
+      ],
+      "network_config": {
+        "base_url": "http://freellmapi:3001/v1",
+        "default_request_timeout_in_seconds": 120,
+        "max_retries": 3,
+        "retry_backoff_initial": 500,
+        "retry_backoff_max": 3000
+      },
+      "custom_provider_config": {
+        "base_provider_type": "openai",
+        "allowed_requests": {
+          "chat_completion": true,
+          "chat_completion_stream": true
+        }
+      }
+    },
+    "pro": {
+      "keys": [
+        {
+          "name": "pro-commercial-key",
+          "value": "env.OPENAI_API_KEY",
+          "models": ["*"],
+          "weight": 0.0
         }
       ]
     }
-  ]
+  },
+  "governance": {
+    "virtual_keys": [
+      {
+        "id": "vk-production-main",
+        "name": "Production Sovereign Key",
+        "value": "env.BIFROST_VIRTUAL_KEY",
+        "is_active": true,
+        "rate_limits": {
+          "requests_per_minute": 120
+        },
+        "provider_configs": [
+          {
+            "provider": "freellmapi",
+            "allowed_models": ["*"],
+            "key_ids": ["*"],
+            "weight": 1.0
+          },
+          {
+            "provider": "pro",
+            "allowed_models": ["*"],
+            "key_ids": ["*"],
+            "weight": 0.0
+          }
+        ]
+      }
+    ],
+    "routing_rules": [
+      {
+        "id": "rule-freellm-zero-cost-priority",
+        "name": "Prioritize FreeLLMAPI with Paid Commercial Failover",
+        "cel_expression": "true",
+        "targets": [
+          {
+            "provider": "freellmapi",
+            "weight": 1.0
+          }
+        ],
+        "fallbacks": [
+          "pro"
+        ]
+      }
+    ]
+  }
 }

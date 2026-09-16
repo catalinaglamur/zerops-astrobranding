@@ -25,7 +25,7 @@ services:
 
   # Tier 1 Runtime: FreeLLMAPI (Priority 8 - Starts first to expose LLM upstream API key)
   - hostname: freellmapi
-    type: ubuntu/nodejs@22
+    type: ubuntu/nodejs@24
     startWithoutCode: true
     enableSubdomainAccess: true
     priority: 8

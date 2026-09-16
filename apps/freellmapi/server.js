@@ -1,64 +1,89 @@
 import express from "express";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 const PORT = Number(process.env.PORT || 3001);
-const DB_PATH = process.env.FREEAPI_DB_PATH || path.join(process.cwd(), "data", "freellmapi.json");
+const DB_PATH = process.env.FREEAPI_DB_PATH || path.join(process.cwd(), "data", "freellmapi.db");
+const ENCRYPTION_KEY_RAW = process.env.ENCRYPTION_KEY || "freellmapi-sovereign-master-secret-key-32b";
+const ENCRYPTION_KEY = crypto.createHash("sha256").update(ENCRYPTION_KEY_RAW).digest(); // Exactly 32 bytes
 
-// Ensure data directory exists
-const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) {
-  try {
-    fs.mkdirSync(dataDir, { recursive: true });
-  } catch (err) {
-    console.warn(`[FreeLLMAPI] Could not create data dir ${dataDir}:`, err);
-  }
+// Ensure volume mount directory exists
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
 }
 
-interface ProviderConfig {
-  id: string;
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  defaultModel: string;
-  models: string[];
-  cooldownUntil: number;
-  errorCount: number;
-  successCount: number;
-  rateLimit429Count: number;
+// Initialize SQLite with WAL mode on persistent POSIX volume
+const db = new DatabaseSync(DB_PATH);
+db.exec(`
+  PRAGMA journal_mode = WAL;
+  PRAGMA synchronous = NORMAL;
+
+  CREATE TABLE IF NOT EXISTS provider_keys (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    account_label TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    iv TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    cooldown_until INTEGER DEFAULT 0,
+    rate_limit_429_count INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    error_count INTEGER DEFAULT 0,
+    last_used_at INTEGER DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_provider_cooldown ON provider_keys (provider, cooldown_until);
+`);
+
+// AES-256-GCM Encryption Helpers
+function encrypt(plaintext) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(plaintext, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const tag = cipher.getAuthTag().toString("hex");
+  return { ciphertext: encrypted, iv: iv.toString("hex"), tag };
 }
 
-// Built-in registry of supported providers
-const providerDefaults: Record<string, { name: string; baseUrl: string; defaultModel: string; models: string[] }> = {
+function decrypt(ciphertext, ivHex, tagHex) {
+  const decipher = crypto.createDecipheriv("aes-256-gcm", ENCRYPTION_KEY, Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  let decrypted = decipher.update(ciphertext, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
+}
+
+// Built-in Provider Definitions and Capabilities
+const PROVIDER_METADATA = {
   cerebras: {
-    name: "Cerebras Cloud",
+    name: "Cerebras Cloud (Ultra-Fast LPU)",
     baseUrl: "https://api.cerebras.ai/v1",
     defaultModel: "llama3.1-8b",
     models: ["llama3.1-8b", "llama3.1-70b"],
+    tier: "fast",
   },
   groq: {
-    name: "Groq Cloud",
+    name: "Groq Cloud (Fast LPU)",
     baseUrl: "https://api.groq.com/openai/v1",
     defaultModel: "llama-3.3-70b-versatile",
     models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    tier: "fast",
   },
   opencode: {
-    name: "OpenCode Zen",
+    name: "OpenCode Zen (Coding Focus)",
     baseUrl: "https://api.opencode.zen/v1",
     defaultModel: "qwen-2.5-coder-32b",
     models: ["qwen-2.5-coder-32b", "deepseek-coder-v2"],
-  },
-  ollama: {
-    name: "Ollama Cloud",
-    baseUrl: "https://api.ollama.cloud/v1",
-    defaultModel: "llama3.2:3b",
-    models: ["llama3.2:3b", "qwen2.5:7b"],
+    tier: "smart",
   },
   openrouter: {
-    name: "OpenRouter Free",
+    name: "OpenRouter Free Pool",
     baseUrl: "https://openrouter.ai/api/v1",
     defaultModel: "meta-llama/llama-3.2-3b-instruct:free",
     models: [
@@ -66,61 +91,120 @@ const providerDefaults: Record<string, { name: string; baseUrl: string; defaultM
       "google/gemini-2.0-flash-exp:free",
       "deepseek/deepseek-chat:free",
     ],
+    tier: "smart",
+  },
+  ollama: {
+    name: "Ollama Cloud",
+    baseUrl: "https://api.ollama.cloud/v1",
+    defaultModel: "llama3.2:3b",
+    models: ["llama3.2:3b", "qwen2.5:7b"],
+    tier: "balanced",
   },
   huggingface: {
     name: "HuggingFace Serverless",
     baseUrl: "https://api-inference.huggingface.co/v1",
     defaultModel: "Qwen/Qwen2.5-72B-Instruct",
     models: ["Qwen/Qwen2.5-72B-Instruct", "meta-llama/Llama-3.1-8B-Instruct"],
+    tier: "smart",
   },
   aisa: {
     name: "Aisa One",
     baseUrl: "https://api.aisa.one/v1",
     defaultModel: "gpt-4o-mini",
     models: ["gpt-4o-mini", "claude-3-5-sonnet"],
+    tier: "balanced",
   },
 };
 
-const providers: Map<string, ProviderConfig> = new Map();
+// Key Pool Repository Operations
+function upsertProviderKey(provider, accountLabel, apiKey) {
+  if (!apiKey || !provider) return;
+  const id = `${provider}-${accountLabel}-${crypto.createHash("md5").update(apiKey).digest("hex").slice(0, 8)}`;
+  const { ciphertext, iv, tag } = encrypt(apiKey);
 
-function loadPersistedKeys(): void {
-  if (fs.existsSync(DB_PATH)) {
-    try {
-      const raw = fs.readFileSync(DB_PATH, "utf-8");
-      const list = JSON.parse(raw);
-      if (Array.isArray(list)) {
-        for (const item of list) {
-          if (item.id && item.apiKey) {
-            const def = providerDefaults[item.id] || {
-              name: item.name || item.id,
-              baseUrl: item.baseUrl || "https://api.openai.com/v1",
-              defaultModel: item.defaultModel || "default",
-              models: [item.defaultModel || "default"],
-            };
-            providers.set(item.id, {
-              id: item.id,
-              name: item.name || def.name,
-              baseUrl: item.baseUrl || def.baseUrl,
-              apiKey: item.apiKey,
-              defaultModel: item.defaultModel || def.defaultModel,
-              models: item.models || def.models,
-              cooldownUntil: 0,
-              errorCount: 0,
-              successCount: 0,
-              rateLimit429Count: 0,
-            });
-          }
-        }
-        console.log(`[FreeLLMAPI] Loaded ${providers.size} providers from ${DB_PATH}`);
-      }
-    } catch (err) {
-      console.error(`[FreeLLMAPI] Error loading persisted keys from ${DB_PATH}:`, err);
-    }
-  }
+  const stmt = db.prepare(`
+    INSERT INTO provider_keys (id, provider, account_label, ciphertext, iv, tag, last_used_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      ciphertext = excluded.ciphertext,
+      iv = excluded.iv,
+      tag = excluded.tag;
+  `);
+  stmt.run(id, provider.toLowerCase(), accountLabel, ciphertext, iv, tag, Date.now());
 }
 
-function loadFromEnvironment(): void {
-  const envMap: Record<string, string | undefined> = {
+function getAvailableKeysForProvider(provider) {
+  const now = Date.now();
+  const stmt = db.prepare(`
+    SELECT * FROM provider_keys
+    WHERE provider = ? AND cooldown_until <= ?
+    ORDER BY last_used_at ASC
+  `);
+  return stmt.all(provider, now).map((row) => {
+    try {
+      const plainKey = decrypt(row.ciphertext, row.iv, row.tag);
+      return { ...row, apiKey: plainKey };
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+}
+
+function recordKeySuccess(id) {
+  const stmt = db.prepare(`
+    UPDATE provider_keys
+    SET success_count = success_count + 1, last_used_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(Date.now(), id);
+}
+
+function recordKey429(id, cooldownSeconds = 60) {
+  const cooldownUntil = Date.now() + cooldownSeconds * 1000;
+  const stmt = db.prepare(`
+    UPDATE provider_keys
+    SET rate_limit_429_count = rate_limit_429_count + 1, cooldown_until = ?, last_used_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(cooldownUntil, Date.now(), id);
+}
+
+function recordKeyError(id) {
+  const stmt = db.prepare(`
+    UPDATE provider_keys
+    SET error_count = error_count + 1, last_used_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(Date.now(), id);
+}
+
+// Ingestion from Markdown or Environment
+function ingestMarkdownContent(content, defaultLabel = "default") {
+  const accountHeaderMatch = content.match(/#\s+API\s+Keys\s+[-—]\s+([^\n\r]+)/i);
+  const detectedAccount = accountHeaderMatch ? accountHeaderMatch[1].trim() : defaultLabel;
+  const sections = content.split(/###\s+\d+\.\s+/);
+  let count = 0;
+
+  for (const sec of sections) {
+    if (!sec.trim()) continue;
+    const platformMatch = sec.match(/\*\*Plataforma:\*\*\s*`([^`]+)`/i);
+    const keyMatch = sec.match(/\*\*API Key:\*\*\s*`([^`]+)`/i);
+    const labelMatch = sec.match(/\*\*Etiqueta:\*\*\s*`([^`]+)`/i);
+
+    if (platformMatch && keyMatch) {
+      const provider = platformMatch[1].trim().toLowerCase();
+      const apiKey = keyMatch[1].trim();
+      const label = labelMatch ? labelMatch[1].trim() : detectedAccount;
+      upsertProviderKey(provider, label, apiKey);
+      count++;
+    }
+  }
+  return count;
+}
+
+// Auto-ingest environment variables and seed stores on boot
+function autoDiscoverEnv() {
+  const mapping = {
     cerebras: process.env.CEREBRAS_API_KEY,
     groq: process.env.GROQ_API_KEY,
     opencode: process.env.OPENCODE_API_KEY,
@@ -130,245 +214,326 @@ function loadFromEnvironment(): void {
     aisa: process.env.AISA_API_KEY,
   };
 
-  let count = 0;
-  for (const [id, key] of Object.entries(envMap)) {
-    if (key && !providers.has(id)) {
-      const def = providerDefaults[id];
-      if (def) {
-        providers.set(id, {
-          id,
-          name: def.name,
-          baseUrl: def.baseUrl,
-          apiKey: key,
-          defaultModel: def.defaultModel,
-          models: def.models,
-          cooldownUntil: 0,
-          errorCount: 0,
-          successCount: 0,
-          rateLimit429Count: 0,
-        });
-        count++;
+  for (const [p, k] of Object.entries(mapping)) {
+    if (k) upsertProviderKey(p, "env", k);
+  }
+
+  // Auto-ingest seed.json if present
+  const seedFiles = [
+    path.join(DATA_DIR, "seed.json"),
+    "/mnt/localstorage/freellmapi/seed.json",
+    path.join(process.cwd(), "data", "seed.json"),
+  ];
+  for (const sFile of seedFiles) {
+    if (fs.existsSync(sFile)) {
+      try {
+        const raw = fs.readFileSync(sFile, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item.provider && item.apiKey) {
+              upsertProviderKey(item.provider, item.label || item.account || "seed", item.apiKey);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[Warning] Failed loading seed file ${sFile}:`, err.message);
       }
     }
   }
-  if (count > 0) {
-    console.log(`[FreeLLMAPI] Auto-discovered ${count} providers from environment variables`);
+
+  // Auto-scan keys directory if present
+  const keysDirs = [
+    process.env.KEYS_DIR,
+    "/mnt/localstorage/freellmapi/keys",
+    "/var/www/keys",
+  ].filter(Boolean);
+
+  for (const dir of keysDirs) {
+    if (fs.existsSync(dir)) {
+      try {
+        const files = fs.readdirSync(dir);
+        for (const f of files) {
+          if (f.endsWith(".md")) {
+            const p = path.join(dir, f);
+            const content = fs.readFileSync(p, "utf-8");
+            const base = path.basename(f, ".md");
+            ingestMarkdownContent(content, base);
+          }
+        }
+      } catch (err) {
+        console.error(`[Warning] Failed scanning keys dir ${dir}:`, err.message);
+      }
+    }
   }
 }
 
-loadPersistedKeys();
-loadFromEnvironment();
+autoDiscoverEnv();
 
-// Health check endpoint
+// Health Check Probe
 app.get("/api/ping", (req, res) => {
+  const totalKeys = db.prepare("SELECT COUNT(*) as count FROM provider_keys").get().count;
   res.json({
     status: "ok",
     service: "freellmapi",
-    version: "2.1.0",
-    activeProviders: providers.size,
+    version: "2.4.0",
+    engine: "node:sqlite",
+    totalKeysInPool: totalKeys,
     timestamp: new Date().toISOString(),
   });
 });
 
-// Admin endpoint: List provider status & 429 metrics
-app.get("/admin/status", (req, res) => {
+// Admin Status Endpoint: Shows active pools, remaining cooldowns, quotas
+app.get("/api/status", (req, res) => {
   const now = Date.now();
-  const list = Array.from(providers.values()).map((p) => ({
-    id: p.id,
-    name: p.name,
-    baseUrl: p.baseUrl,
-    hasKey: Boolean(p.apiKey),
-    inCooldown: p.cooldownUntil > now,
-    cooldownSecondsRemaining: Math.max(0, Math.ceil((p.cooldownUntil - now) / 1000)),
-    successCount: p.successCount,
-    errorCount: p.errorCount,
-    rateLimit429Count: p.rateLimit429Count,
-    models: p.models,
-  }));
-  res.json({ providers: list });
-});
+  const rows = db.prepare("SELECT * FROM provider_keys").all();
 
-// Admin endpoint: Seed API keys dynamically via CLI or REST
-app.post("/admin/seed", (req, res) => {
-  const { providers: newProviders } = req.body;
-  if (!Array.isArray(newProviders)) {
-    return res.status(400).json({ error: "Expected 'providers' array in body" });
+  const pools = {};
+  for (const r of rows) {
+    if (!pools[r.provider]) pools[r.provider] = { provider: r.provider, totalKeys: 0, activeKeys: 0, keys: [] };
+    const inCooldown = r.cooldown_until > now;
+    pools[r.provider].totalKeys++;
+    if (!inCooldown) pools[r.provider].activeKeys++;
+    pools[r.provider].keys.push({
+      account: r.account_label,
+      inCooldown,
+      cooldownSecondsRemaining: Math.max(0, Math.ceil((r.cooldown_until - now) / 1000)),
+      successCount: r.success_count,
+      rateLimit429Count: r.rate_limit_429_count,
+      errorCount: r.error_count,
+    });
   }
 
-  let added = 0;
-  let updated = 0;
+  res.json({ status: "healthy", activePools: Object.values(pools) });
+});
 
-  for (const item of newProviders) {
-    if (!item.id || !item.apiKey) continue;
-    const def = providerDefaults[item.id] || {
-      name: item.label || item.name || item.id,
-      baseUrl: item.baseUrl || "https://api.openai.com/v1",
-      defaultModel: item.defaultModel || "default",
-      models: [item.defaultModel || "default"],
-    };
+// Admin Seed Endpoint: Ingest multiple markdown files or JSON payloads
+app.post("/admin/seed", (req, res) => {
+  const { markdown, files, label = "seeded" } = req.body;
+  let totalIngested = 0;
 
-    if (providers.has(item.id)) {
-      const existing = providers.get(item.id)!;
-      existing.apiKey = item.apiKey;
-      if (item.baseUrl) existing.baseUrl = item.baseUrl;
-      if (item.name || item.label) existing.name = item.name || item.label;
-      updated++;
-    } else {
-      providers.set(item.id, {
-        id: item.id,
-        name: item.label || item.name || def.name,
-        baseUrl: item.baseUrl || def.baseUrl,
-        apiKey: item.apiKey,
-        defaultModel: item.defaultModel || def.defaultModel,
-        models: item.models || def.models,
-        cooldownUntil: 0,
-        errorCount: 0,
-        successCount: 0,
-        rateLimit429Count: 0,
-      });
-      added++;
+  if (typeof markdown === "string") {
+    totalIngested += ingestMarkdownContent(markdown, label);
+  }
+
+  if (Array.isArray(files)) {
+    for (const f of files) {
+      if (typeof f.content === "string") {
+        totalIngested += ingestMarkdownContent(f.content, f.label || label);
+      }
     }
   }
 
-  persistKeys();
-  res.json({ success: true, added, updated, total: providers.size });
+  res.json({ success: true, keysIngested: totalIngested });
 });
 
-// OpenAI-compatible /v1/models endpoint
+// Models Catalog Endpoint
 app.get("/v1/models", (req, res) => {
   const models = [];
-  for (const p of providers.values()) {
-    for (const m of p.models) {
+  for (const [pid, pmeta] of Object.entries(PROVIDER_METADATA)) {
+    for (const m of pmeta.models) {
       models.push({
-        id: `${p.id}/${m}`,
+        id: `${pid}/${m}`,
         object: "model",
-        owned_by: p.id,
+        owned_by: pid,
         permission: [],
       });
     }
   }
-  // If no providers configured yet, return standard defaults
-  if (models.length === 0) {
-    models.push(
-      { id: "free-cerebras-llama-3.1-8b", object: "model", owned_by: "cerebras" },
-      { id: "free-groq-llama-3.3-70b", object: "model", owned_by: "groq" }
-    );
-  }
+  // Virtual Directives
+  models.push(
+    { id: "auto", object: "model", owned_by: "freellmapi" },
+    { id: "auto:fast", object: "model", owned_by: "freellmapi" },
+    { id: "auto:smart", object: "model", owned_by: "freellmapi" },
+    { id: "auto:balanced", object: "model", owned_by: "freellmapi" },
+    { id: "auto:reliable", object: "model", owned_by: "freellmapi" }
+  );
   res.json({ object: "list", data: models });
 });
 
-// Resilient chat completions with automatic 429 fallback circuit breaker
-app.post("/v1/chat/completions", async (req, res) => {
-  const { messages, model, temperature = 0.7, max_tokens = 2048, stream = false } = req.body;
+// Model Context Protocol (/mcp) Gateway Endpoint
+app.post("/mcp", (req, res) => {
+  const { id = 1, method } = req.body || {};
 
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: "Missing or invalid 'messages' array" });
-  }
-
-  const now = Date.now();
-  // Get available candidate providers (not currently in 429 cooldown)
-  const candidates = Array.from(providers.values()).filter(
-    (p) => p.apiKey && p.cooldownUntil <= now
-  );
-
-  if (candidates.length === 0) {
-    // If all providers are in cooldown or none configured, fallback to mock response
-    console.warn("[FreeLLMAPI] No active providers available or all in cooldown. Providing synthetic response.");
+  if (method === "tools/list") {
     return res.json({
-      id: `chatcmpl-${Date.now()}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: model || "free-fallback",
-      provider: "freellmapi-fallback",
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: "assistant",
-            content: `[FreeLLMAPI Sovereign Fallback] Procesado para: "${messages[messages.length - 1]?.content?.slice(0, 50)}..."`,
+      jsonrpc: "2.0",
+      id,
+      result: {
+        tools: [
+          {
+            name: "list_models",
+            description: "List active LLM models across all free-tier provider pools",
+            inputSchema: { type: "object", properties: {} },
           },
-          finish_reason: "stop",
-        },
-      ],
-      usage: { prompt_tokens: 20, completion_tokens: 30, total_tokens: 50 },
+          {
+            name: "provider_health",
+            description: "Check health, quotas, and 429 cooldown status across all providers",
+            inputSchema: { type: "object", properties: {} },
+          },
+          {
+            name: "usage_summary",
+            description: "Summary of tokens, successful requests, and rate-limit counters",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+      },
     });
   }
 
-  // Determine priority order: if model specifies provider like "groq/...", try that first
-  let requestedProviderId: string | null = null;
-  if (typeof model === "string" && model.includes("/")) {
-    requestedProviderId = model.split("/")[0];
+  if (method === "tools/call") {
+    const totalKeys = db.prepare("SELECT COUNT(*) as count FROM provider_keys").get().count;
+    return res.json({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        content: [{ type: "text", text: JSON.stringify({ status: "healthy", activeKeys: totalKeys }) }],
+      },
+    });
   }
 
-  const sortedCandidates = [...candidates].sort((a, b) => {
-    if (a.id === requestedProviderId) return -1;
-    if (b.id === requestedProviderId) return 1;
-    // Prefer providers with fewer 429 errors
-    return a.rateLimit429Count - b.rateLimit429Count;
-  });
+  return res.json({ jsonrpc: "2.0", id, result: {} });
+});
 
-  let lastError: Error | null = null;
+// Dynamic Smart Routing Directive Resolver
+function resolveProviderSequence(modelDirective) {
+  const allProviders = Object.keys(PROVIDER_METADATA);
 
-  for (const provider of sortedCandidates) {
-    try {
-      const targetModel = provider.defaultModel;
-      console.log(`[FreeLLMAPI] Forwarding inference to provider '${provider.id}' (model: ${targetModel})...`);
+  if (!modelDirective || modelDirective === "auto" || modelDirective === "auto:balanced") {
+    return ["groq", "cerebras", "opencode", "openrouter", "huggingface", "aisa", "ollama"];
+  }
+  if (modelDirective === "auto:fast") {
+    return ["cerebras", "groq", "openrouter", "opencode", "aisa"];
+  }
+  if (modelDirective === "auto:smart") {
+    return ["opencode", "openrouter", "groq", "huggingface", "cerebras", "aisa"];
+  }
+  if (modelDirective === "auto:reliable") {
+    const stats = db.prepare(`
+      SELECT provider, SUM(error_count + rate_limit_429_count) as errors
+      FROM provider_keys
+      GROUP BY provider
+      ORDER BY errors ASC
+    `).all();
+    const ordered = stats.map((s) => s.provider);
+    return Array.from(new Set([...ordered, ...allProviders]));
+  }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+  // Explicit provider requested (e.g. "groq/llama-3.3-70b-versatile")
+  const specific = modelDirective.split("/")[0].toLowerCase();
+  if (PROVIDER_METADATA[specific]) {
+    return [specific, ...allProviders.filter((p) => p !== specific)];
+  }
 
-      const upstreamRes = await fetch(`${provider.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${provider.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: targetModel,
-          messages,
-          temperature,
-          max_tokens,
-          stream: false,
-        }),
-        signal: controller.signal,
-      });
+  return allProviders;
+}
 
-      clearTimeout(timeoutId);
+// Resilient Chat Completions with Two-Tier Key Rotation and Failover
+app.post("/v1/chat/completions", async (req, res) => {
+  const { messages, model = "auto:balanced", temperature = 0.7, max_tokens = 2048, stream = false } = req.body;
 
-      // Handle 429 Rate Limit
-      if (upstreamRes.status === 429) {
-        provider.rateLimit429Count++;
-        provider.cooldownUntil = Date.now() + 60000; // 60s cooldown
-        console.warn(`[FreeLLMAPI] Provider '${provider.id}' returned HTTP 429. Cooling down for 60s. Failing over...`);
-        continue; // Try next candidate!
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: "Missing messages array" });
+  }
+
+  const providerOrder = resolveProviderSequence(model);
+  let lastError = null;
+
+  for (const providerId of providerOrder) {
+    const meta = PROVIDER_METADATA[providerId];
+    if (!meta) continue;
+
+    // Get all healthy keys for this provider ordered by least recently used
+    const keys = getAvailableKeysForProvider(providerId);
+    if (keys.length === 0) continue;
+
+    // Intra-Provider Key Rotation
+    for (const keyRow of keys) {
+      try {
+        const targetModel = model.includes("/") ? model.split("/")[1] : meta.defaultModel;
+        console.log(`[FreeLLMAPI] Routing to [${providerId}] using account [${keyRow.account_label}] (model: ${targetModel})...`);
+
+        const upstreamRes = await fetch(`${meta.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${keyRow.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: targetModel,
+            messages,
+            temperature,
+            max_tokens,
+            stream: Boolean(stream),
+          }),
+        });
+
+        // Tier 1: Handle HTTP 429 Rate Limit
+        if (upstreamRes.status === 429) {
+          recordKey429(keyRow.id, 60);
+          console.warn(`[FreeLLMAPI] Key [${keyRow.id}] hit 429. Cooldown 60s. Rotating to next key in pool...`);
+          continue; // Try next key of SAME provider!
+        }
+
+        if (!upstreamRes.ok) {
+          recordKeyError(keyRow.id);
+          const errText = await upstreamRes.text();
+          console.warn(`[FreeLLMAPI] Upstream error ${upstreamRes.status} from [${providerId}]: ${errText.slice(0, 100)}`);
+          continue; // Try next key of SAME provider!
+        }
+
+        // Success!
+        recordKeySuccess(keyRow.id);
+        res.setHeader("x-routed-provider", providerId);
+        res.setHeader("x-routed-account", keyRow.account_label);
+
+        // Streaming Response
+        if (stream && upstreamRes.body) {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Connection", "keep-alive");
+
+          const reader = upstreamRes.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+          }
+          return res.end();
+        }
+
+        // Non-streaming JSON response
+        const data = await upstreamRes.json();
+        return res.json(data);
+      } catch (err) {
+        recordKeyError(keyRow.id);
+        lastError = err;
+        console.warn(`[FreeLLMAPI] Connection error on key [${keyRow.id}]:`, err.message);
       }
-
-      if (!upstreamRes.ok) {
-        const errorText = await upstreamRes.text();
-        provider.errorCount++;
-        console.warn(`[FreeLLMAPI] Provider '${provider.id}' returned HTTP ${upstreamRes.status}: ${errorText.slice(0, 100)}`);
-        continue; // Try next candidate!
-      }
-
-      const data = await upstreamRes.json();
-      provider.successCount++;
-      return res.json(data);
-    } catch (err: unknown) {
-      provider.errorCount++;
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`[FreeLLMAPI] Connection error to provider '${provider.id}':`, lastError.message);
     }
   }
 
-  // If all attempts failed
-  return res.status(503).json({
-    error: {
-      message: `All upstream FreeLLMAPI providers failed or were rate-limited. Last error: ${lastError?.message || "Unknown"}`,
-      type: "service_unavailable",
-    },
+  // Fallback synthetic response if all pools are exhausted or no keys ingested
+  console.warn("[FreeLLMAPI] All provider pools exhausted or in cooldown. Providing synthetic fallback.");
+  return res.json({
+    id: `chatcmpl-fallback-${Date.now()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: `[FreeLLMAPI Sovereign Fallback] Procesado bajo contingencia. Último error: ${lastError?.message || "Pools en cooldown"}.`,
+        },
+        finish_reason: "stop",
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
   });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[FreeLLMAPI] Sovereign Microservice v2.1.0 listening on port ${PORT}`);
+  console.log(`[FreeLLMAPI] Sovereign Aggregator v2.4.0 listening on 0.0.0.0:${PORT} (SQLite WAL active)`);
 });

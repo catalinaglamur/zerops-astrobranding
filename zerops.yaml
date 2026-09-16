@@ -71,10 +71,10 @@ zerops:
         VALKEY_PASSWORD: ${valkey_password}
         FREELLMAPI_URL: "http://freellmapi:3001/v1"
 
-  # 3. FreeLLMAPI Multi-Provider Free Inference Proxy (Node.js 22)
+  # 3. FreeLLMAPI Multi-Provider Free Inference Proxy (Node.js 24)
   - setup: freellmapi
     build:
-      base: nodejs@22
+      base: nodejs@24
       os: ubuntu
       buildCommands:
         - cd apps/freellmapi && npm install
@@ -83,8 +83,12 @@ zerops:
       cache:
         - ~/.npm
     run:
-      base: nodejs@22
+      base: nodejs@24
       os: ubuntu
+      volume:
+        hostname: localstorage
+        mountPath: /mnt/localstorage
+        readOnly: false
       ports:
         - port: 3001
           httpSupport: true
