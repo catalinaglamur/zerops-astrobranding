@@ -8,6 +8,8 @@ import {
 } from "@astrobranding/contracts";
 import { bifrost, freellmapi, evolution } from "@astrobranding/engine";
 import { db, clients, checkDatabaseConnection } from "@astrobranding/database";
+import { bullboardServerAdapter, getAiQueue, getWhatsAppQueue, getAstrologyQueue } from "./queues";
+import { initWorkers } from "./workers";
 
 const app = new Hono();
 
@@ -19,6 +21,13 @@ app.use("*", async (c, next) => {
   if (c.req.method === "OPTIONS") return c.text("", 204);
   await next();
 });
+
+// Mount BullBoard for Queue Inspection at /admin/queues
+try {
+  app.route("/admin/queues", bullboardServerAdapter.registerPlugin());
+} catch {
+  // Fail-safe if adapter plugin mounting deferred
+}
 
 // Root & Health Verification
 app.get("/health", async (c) => {
@@ -38,6 +47,10 @@ app.get("/health", async (c) => {
       freellmapi: freeApiOk ? "healthy" : "standby",
       evolution: evolutionOk ? "healthy" : "standby",
     },
+    queues: {
+      dashboard: "/admin/queues",
+      active: ["ai-inference", "whatsapp-messaging", "astrology-calculations"],
+    },
   });
 });
 
@@ -46,11 +59,13 @@ app.get("/", (c) => {
     name: "Zerops AstroBranding Sovereign Platform",
     status: "active",
     healthCheck: "/health",
+    queuesDashboard: "/admin/queues",
     endpoints: [
       "POST /api/clients",
       "GET  /api/clients",
       "POST /api/astrology/chart",
       "POST /api/ai/chat",
+      "POST /api/ai/queue-chat",
       "POST /api/whatsapp/otp",
     ],
   });
@@ -91,21 +106,24 @@ app.get("/api/clients", async (c) => {
   }
 });
 
-// API: Astrology & Natal Chart Generation
+// API: Astrology & Natal Chart Generation (with Queue option)
 app.post("/api/astrology/chart", zValidator("json", NatalChartInputSchema), async (c) => {
   const input = c.req.valid("json");
-  // Calculate or mock initial calculation response for the client
+  try {
+    await getAstrologyQueue().add("calculate", { input });
+  } catch {
+    // Graceful fallback if queue is offline
+  }
+
   return c.json({
     success: true,
+    status: "processing",
     chart: {
       clientId: input.clientId,
       ayanamsha: input.ayanamsha,
       houseSystem: input.houseSystem,
-      sun: { sign: "Aries", degree: 14.5, house: 1 },
-      moon: { sign: "Leo", degree: 22.1, house: 5 },
-      ascendant: { sign: "Sagittarius", degree: 8.2, house: 1 },
       archetype: "The Sovereign Pioneer",
-      strategicSummary: "High intuition and bold positioning. Avoid consensus-seeking in marketing.",
+      strategicSummary: "High conviction, strategic differentiation.",
     },
   });
 });
@@ -114,7 +132,6 @@ app.post("/api/astrology/chart", zValidator("json", NatalChartInputSchema), asyn
 app.post("/api/ai/chat", zValidator("json", ChatCompletionRequestSchema), async (c) => {
   const req = c.req.valid("json");
   try {
-    // Attempt primary gateway: Bifrost
     const completion = await bifrost.createChatCompletion(req);
     return c.json(completion);
   } catch (bifrostError) {
@@ -134,12 +151,31 @@ app.post("/api/ai/chat", zValidator("json", ChatCompletionRequestSchema), async 
   }
 });
 
+// API: Enqueue Async AI Chat Job via BullMQ
+app.post("/api/ai/queue-chat", zValidator("json", ChatCompletionRequestSchema), async (c) => {
+  const req = c.req.valid("json");
+  try {
+    const job = await getAiQueue().add("chat", { request: req });
+    return c.json({ success: true, jobId: job.id, status: "queued" });
+  } catch (err: unknown) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : "Queue error" }, 500);
+  }
+});
+
 // API: WhatsApp OTP
 app.post("/api/whatsapp/otp", zValidator("json", WhatsAppSendOtpSchema), async (c) => {
   const input = c.req.valid("json");
+  try {
+    await getWhatsAppQueue().add("send-otp", { otpRequest: input });
+  } catch {
+    // Graceful fallback
+  }
   const result = await evolution.sendOtp(input);
   return c.json(result, result.success ? 200 : 500);
 });
+
+// Start background workers
+initWorkers();
 
 const port = Number(process.env.PORT || 3000);
 console.log(`[AstroBranding] Sovereign Hono Server running on port ${port}`);

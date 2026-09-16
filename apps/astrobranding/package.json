@@ -11,8 +11,12 @@
     "@astrobranding/contracts": "workspace:*",
     "@astrobranding/database": "workspace:*",
     "@astrobranding/engine": "workspace:*",
+    "@bull-board/api": "9.10.1",
+    "@bull-board/hono": "9.10.1",
     "@hono/zod-validator": "^0.4.3",
+    "bullmq": "6.3.6",
     "hono": "^4.7.0",
+    "ioredis": "6.0.0",
     "zod": "^3.24.2"
   }
 }

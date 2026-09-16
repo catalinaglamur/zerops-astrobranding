@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "bootstrap": "bun scripts/bootstrap.mjs",
     "dev": "bun --filter astrobranding dev",
     "dev:website": "bun --filter @astrobranding/website dev",
     "dev:webapp": "bun --filter @astrobranding/webapp dev",
