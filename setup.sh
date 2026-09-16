@@ -41,6 +41,6 @@ bun scripts/architecture-check.mjs
 
 echo "=================================================================="
 echo "✅ Setup finished successfully! Everything is automated."
-echo "   • Local server: bun run dev (serves unified app on port 3000)"
-echo "   • Zerops 10-Service Mesh: zcli project import import.yaml"
+echo "   • Local dev server: bun run dev (port 3000)
+   • Zerops Platform: AGY handles deployment natively via Zerops MCP tools"
 echo "=================================================================="
