@@ -4,27 +4,58 @@ This repository is a sovereign, agnostic multi-ZCP monorepo template for Zerops 
 
 ---
 
-## 🏛️ Core Principles & Invariants
+## 🚀 How to Onboard & Start This Repository in a Fresh ZCP
 
-1. **Multi-ZCP & Client Agnostic**:
-   - Zero hardcoded client credentials, API keys, or absolute host paths (e.g. do not assume `/var/www/baiosfera` or specific account emails).
-   - Ingest credentials dynamically from `/var/www/.env`, `/var/www/keys/`, or user-supplied `.md` files via `scripts/seed-freellm-keys.mjs`.
+When a user opens this repository in a brand-new ZCP container, execute the following protocol:
 
-2. **Strict Step-by-Step Initialization (`setup.sh`)**:
-   - When preparing this repository in a fresh ZCP container, execute the setup **step-by-step**, NEVER all at once blindly:
-     - `./setup.sh --step 1`: Workspace & environment validation.
-     - `./setup.sh --step 2`: Workspace dependency installation with Bun.
-     - `./setup.sh --step 3 [keys.md]`: FreeLLMAPI multi-account key ingestion and quota stacking.
-     - `./setup.sh --step 4`: Architecture boundary check and TypeScript compilation (`tsc --noEmit`).
-     - `./setup.sh --step 5`: Fullstack build validation.
-     - `./setup.sh --step 6`: Zerops platform manifest topology verification (`zcp-validate`).
-   - **Hard Stop on Failure**: If step $N$ fails, STOP immediately. Inspect error logs, fix the code in place, verify the fix with physical sensors (exit code 0), and commit/push to Git before advancing to step $N+1$. A failed preceding step invalidates all subsequent steps.
+### The Human Activation Prompt:
+```text
+Iniciá y desplegá este proyecto paso a paso usando mis credenciales en /ruta/a/mis-keys.md (o /var/www/.env). Seguí estrictamente las instrucciones de AGENTS.md.
+```
 
-3. **Zerops Native Control Plane (ZCP MCP)**:
-   - This container is the ZCP control-plane. Do NOT run or install external `zcli`.
-   - Interact with the platform exclusively via native `zerops_*` MCP tools (`zerops_import`, `zerops_deploy`, `zerops_workflow`, `zerops_env`).
+### AGY Automated Workflow:
+1. **Locate Credentials**: Identify if credentials exist in `/var/www/.env`, `/var/www/keys/`, or a user-provided path.
+2. **Execute Step-by-Step Initialization**:
+   ```bash
+   ./setup.sh --step 1
+   ./setup.sh --step 2
+   ./setup.sh --step 3 /path/to/keys.md
+   ./setup.sh --step 4
+   ./setup.sh --step 5
+   ./setup.sh --step 6
+   ```
+3. **Handle Errors At Once**: If step $N$ fails, HALT immediately. Do not attempt step $N+1$. Fix the code locally, verify with physical sensors (exit code 0), and commit/push to Git before resuming.
+4. **Deploy via Zerops Native MCP**:
+   - Use native MCP tool `zerops_import` with `import.yaml` (or `zerops_workflow action="start" workflow="bootstrap"`).
+   - Zerops provisions the 10 services in priority order (10 -> 8 -> 6 -> 4 -> 2).
+   - Never use `zcli` inside this container; the container is the native ZCP control plane.
 
-4. **GGA & Governance Alignment**:
-   - All mutations must satisfy deterministic sensors (`bun scripts/architecture-check.mjs`, `tsc --noEmit`).
-   - Conventional commits only (no "Co-Authored-By" or AI attribution).
-   - Persist key architectural milestones in Engram (`mem_save`).
+---
+
+## 🏛️ Gentle-AI Governance (GGA, SDD, RDD) Alignment
+
+All changes in this repository must comply with Gentle-AI sovereign governance:
+
+### 1. Gentle Governance Architecture (GGA - F0 to F5)
+- **F0 (Epistemic Inflow)**: Zero static assumptions. All astrology, payment, or platform schemas must align with the canonical research reports in `/var/www/artifacts/astrology_disciplines/` and `/var/www/artifacts/tech_stack_research/`.
+- **F1 (Clarification Gate)**: If any credential, environment variable, or client requirement is missing, ask one direct question and stop.
+- **F2 (Dual-RAG Pre-Plan)**: Audit `packages/contracts` (Zod schemas) and `import.yaml` before changing business logic.
+- **F3 (Validation Feedforward)**: Validate topology with `zcp-validate yaml import.yaml` and layer boundaries with `bun scripts/architecture-check.mjs`.
+- **F4 (Plan Offloading)**: For major features touching $\ge 3$ files, write a structured plan before mutating code.
+- **F5 (Atomic Sensors & Commit)**:
+  - Run physical sensors: `bun run check && bun run check:arch && bun run build` (must exit 0).
+  - Use conventional commits only (strictly NO "Co-Authored-By" or AI attribution).
+  - Save milestones to persistent memory via `mem_save`.
+
+### 2. Spec-Driven Development (SDD) & Receipt-Driven Development (RDD)
+- **SDD**: For complex multi-service features (e.g. adding new payment drivers or astrology engines), structure implementation into clear stages: `spec` $\to$ `design` $\to$ `tasks` $\to$ `apply` $\to$ `verify`.
+- **RDD**: Verify changes through deterministic evidence and receipts (physical exit codes, API ping endpoints, and health checks), avoiding performative agreement or blind assumption.
+
+---
+
+## 🔒 Invariants & Agnostic Standards
+
+- **Multi-ZCP Portability**: Never hardcode account emails, user-specific directories (e.g. `/var/www/baiosfera`), or single-tenant credentials.
+- **FreeLLMAPI Quota Stacking**: Multi-account keys are isolated per account and pooled per provider in SQLite WAL mode on `/mnt/localstorage/freellmapi/freellmapi.db`.
+- **Bifrost v2 GA**: Serves as the Single Front Door on port `:8080`, with CEL routing and semantic caching on Valkey 7.2.
+- **Frappe Idempotency**: All CRM operations must use `search-before-write` or conflict handling to avoid HTTP 409 collisions.
