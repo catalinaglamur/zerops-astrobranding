@@ -5,9 +5,10 @@ import {
   NatalChartInputSchema,
   ChatCompletionRequestSchema,
   WhatsAppSendOtpSchema,
+  UniversalBirthInputSchema,
 } from "@astrobranding/contracts";
-import { bifrost, freellmapi, evolution } from "@astrobranding/engine";
-import { db, clients, checkDatabaseConnection } from "@astrobranding/database";
+import { bifrost, freellmapi, evolution, executeUniversalExtraction, DIAGNOSTIC_PROMPTS } from "@astrobranding/engine";
+import { db, clients, clientDumps, clientFeeds, checkDatabaseConnection, eq } from "@astrobranding/database";
 import { bullboardServerAdapter, getAiQueue, getWhatsAppQueue, getAstrologyQueue } from "./queues";
 import { initWorkers } from "./workers";
 
@@ -18,7 +19,7 @@ app.use("*", async (c, next) => {
   c.header("Access-Control-Allow-Origin", "*");
   c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   c.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (c.req.method === "OPTIONS") return c.text("", 204);
+  if (c.req.method === "OPTIONS") return c.body(null, 204);
   await next();
 });
 
@@ -110,7 +111,8 @@ app.get("/api/clients", async (c) => {
 app.post("/api/astrology/chart", zValidator("json", NatalChartInputSchema), async (c) => {
   const input = c.req.valid("json");
   try {
-    await getAstrologyQueue().add("calculate", { input });
+    const q = getAstrologyQueue();
+    if (q) await q.add("calculate", { input });
   } catch {
     // Graceful fallback if queue is offline
   }
@@ -126,6 +128,34 @@ app.post("/api/astrology/chart", zValidator("json", NatalChartInputSchema), asyn
       strategicSummary: "High conviction, strategic differentiation.",
     },
   });
+});
+
+// API: Universal 15-Shard Extraction (Lakehouse Tier 1 Bronze Dumps & Tier 2 Gold Feeds)
+app.post("/api/v1/extract", zValidator("json", UniversalBirthInputSchema), async (c) => {
+  const input = c.req.valid("json");
+  try {
+    const result = await executeUniversalExtraction(input);
+    return c.json({
+      success: true,
+      dumpId: result.dumps.id,
+      clientId: result.dumps.clientId,
+      feedsGenerated: result.feedsCount,
+    });
+  } catch (err: unknown) {
+    console.error("[API] Error in universal extraction:", err);
+    return c.json({ success: false, error: err instanceof Error ? err.message : "Extraction error" }, 500);
+  }
+});
+
+// API: Query Gold Feeds for a Client
+app.get("/api/v1/feeds/:clientId", async (c) => {
+  const clientId = c.req.param("clientId");
+  try {
+    const feeds = await db.select().from(clientFeeds).where(eq(clientFeeds.clientId, clientId));
+    return c.json({ success: true, clientId, feeds });
+  } catch (err: unknown) {
+    return c.json({ success: false, error: err instanceof Error ? err.message : "Database error" }, 500);
+  }
 });
 
 // API: AI Chat Completion via Sovereign AI Mesh (Bifrost -> FreeLLMAPI)
@@ -155,7 +185,11 @@ app.post("/api/ai/chat", zValidator("json", ChatCompletionRequestSchema), async 
 app.post("/api/ai/queue-chat", zValidator("json", ChatCompletionRequestSchema), async (c) => {
   const req = c.req.valid("json");
   try {
-    const job = await getAiQueue().add("chat", { request: req });
+    const q = getAiQueue();
+    if (!q) {
+      return c.json({ success: false, error: "AI queue is offline" }, 503);
+    }
+    const job = await q.add("chat", { request: req });
     return c.json({ success: true, jobId: job.id, status: "queued" });
   } catch (err: unknown) {
     return c.json({ success: false, error: err instanceof Error ? err.message : "Queue error" }, 500);
@@ -166,7 +200,8 @@ app.post("/api/ai/queue-chat", zValidator("json", ChatCompletionRequestSchema), 
 app.post("/api/whatsapp/otp", zValidator("json", WhatsAppSendOtpSchema), async (c) => {
   const input = c.req.valid("json");
   try {
-    await getWhatsAppQueue().add("send-otp", { otpRequest: input });
+    const q = getWhatsAppQueue();
+    if (q) await q.add("send-otp", { otpRequest: input });
   } catch {
     // Graceful fallback
   }

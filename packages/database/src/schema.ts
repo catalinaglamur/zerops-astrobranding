@@ -17,6 +17,84 @@ export const clients = pgTable("clients", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * 15-Shard Omni Master Manifest Lakehouse Table (Tier 1 Bronze Dumps)
+ * SSoT defined in /var/www/artifacts/omni_shards_master_manifest.md
+ */
+export const clientDumps = pgTable(
+  "client_dumps",
+  {
+    id: uuid("id").default(sql`uuidv7()`).primaryKey(),
+    clientId: uuid("client_id")
+      .references(() => clients.id, { onDelete: "cascade" })
+      .notNull(),
+    birthMetadata: jsonb("birth_metadata").notNull(),
+    shardWesternTropical: jsonb("shard_western_tropical").notNull(),
+    shardWesternSidereal: jsonb("shard_western_sidereal").notNull(),
+    shardVedicJyotish: jsonb("shard_vedic_jyotish").notNull(),
+    shardVedicDashas: jsonb("shard_vedic_dashas").notNull(),
+    shardBaziMetaphysics: jsonb("shard_bazi_metaphysics").notNull(),
+    shardZiweiFengshui: jsonb("shard_ziwei_fengshui").notNull(),
+    shardKabbalahGematria: jsonb("shard_kabbalah_gematria").notNull(),
+    shardHebrewZmanim: jsonb("shard_hebrew_zmanim").notNull(),
+    shardHumanDesign: jsonb("shard_human_design").notNull(),
+    shardCosmobiologyMidpoints: jsonb("shard_cosmobiology_midpoints").notNull(),
+    shardNasaEphemerides: jsonb("shard_nasa_ephemerides").notNull(),
+    shardAstrocartographyAcg: jsonb("shard_astrocartography_acg").notNull(),
+    shardBusinessPentaOrg: jsonb("shard_business_penta_org").notNull(),
+    shardPartnerSynastry: jsonb("shard_partner_synastry").notNull(),
+    shardPredictiveElectional: jsonb("shard_predictive_electional").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("client_dumps_client_id_idx").on(table.clientId),
+  ]
+);
+
+/**
+ * Gold Feeds Table (Tier 2 Gold Projections <1.5 KB XML)
+ * Feeding specialized sub-oracles without context degradation
+ */
+export const clientFeeds = pgTable(
+  "client_feeds",
+  {
+    id: uuid("id").default(sql`uuidv7()`).primaryKey(),
+    clientId: uuid("client_id")
+      .references(() => clients.id, { onDelete: "cascade" })
+      .notNull(),
+    feedType: text("feed_type").notNull(), // diag_a_psy, diag_b_voc, diag_c_mkt, diag_d_leg, diag_e_geo
+    xmlPayload: text("xml_payload").notNull(),
+    tokenEstimate: integer("token_estimate").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("client_feeds_client_id_feed_type_idx").on(table.clientId, table.feedType),
+  ]
+);
+
+/**
+ * Leads & Funnel Opt-In Table (WhatsApp OTP + Email Progressive)
+ */
+export const leads = pgTable(
+  "leads",
+  {
+    id: uuid("id").default(sql`uuidv7()`).primaryKey(),
+    phone: text("phone").notNull(),
+    email: text("email"),
+    name: text("name"),
+    otpCode: text("otp_code"),
+    otpExpiresAt: timestamp("otp_expires_at", { withTimezone: true }),
+    status: text("status").default("unverified").notNull(), // unverified | verified_phone | verified_email | converted
+    crmLeadId: text("crm_lead_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("leads_phone_idx").on(table.phone),
+  ]
+);
+
 export const analyses = pgTable(
   "analyses",
   {
@@ -46,6 +124,7 @@ export const orders = pgTable("orders", {
   currency: text("currency").default("USD").notNull(),
   status: text("status").default("pending").notNull(),
   paymentRef: text("payment_ref"),
+  dianCufe: text("dian_cufe"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -78,6 +157,12 @@ export const taskOutbox = pgTable(
 
 export type Client = typeof clients.$inferSelect;
 export type NewClient = typeof clients.$inferInsert;
+export type ClientDumps = typeof clientDumps.$inferSelect;
+export type NewClientDumps = typeof clientDumps.$inferInsert;
+export type ClientFeeds = typeof clientFeeds.$inferSelect;
+export type NewClientFeeds = typeof clientFeeds.$inferInsert;
+export type Lead = typeof leads.$inferSelect;
+export type NewLead = typeof leads.$inferInsert;
 export type Analysis = typeof analyses.$inferSelect;
 export type NewAnalysis = typeof analyses.$inferInsert;
 export type Order = typeof orders.$inferSelect;
