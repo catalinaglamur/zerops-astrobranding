@@ -1,6 +1,6 @@
 import { Queue } from "bullmq";
 import { createBullBoard } from "@bull-board/api";
-import { BullMQAdapter } from "@bull-board/api/bullMQAdapter.js";
+import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { HonoAdapter } from "@bull-board/hono";
 import { serveStatic } from "hono/bun";
 import { redisConnection } from "./connection";

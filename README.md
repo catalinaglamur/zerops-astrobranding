@@ -1,6 +1,6 @@
 # Zerops AstroBranding Sovereign Platform (Template Monorepo)
 
-> High-Performance, Sovereign Business Intelligence & Astrological Monorepo Template for Zerops Incus LXC Runtimes.  
+> High-Performance, Sovereign Fullstack & Astrological Branding Monorepo Template for Zerops Incus LXC Runtimes.  
 > Inspired by the best of [`di-sukharev/vibe`](https://github.com/di-sukharev/vibe) and [`xanthous-tech/hono-astro-remix-template`](https://github.com/xanthous-tech/hono-astro-remix-template).
 
 ---
@@ -9,20 +9,24 @@
 
 The repository is organized as a **Bun Workspaces Monorepo** managing a **Sovereign Mesh of 10 Services** (5 application runtimes + 5 stateful managed services):
 
-```
+```text
 ├── apps/
-│   ├── astrobranding/      # Core API Gateway (Bun 1.4 + Hono.dev + BullMQ + Bull Board)
-│   ├── website/            # Public Website, Landing & Docs (Astro 5 SSG)
-│   ├── webapp/             # Authenticated Client Cockpit (React 19 + Vite CSR)
-│   ├── bifrost/            # Maxim AI Enterprise Gateway (Go v2.0.0, CEL routing, Valkey cache)
-│   ├── freellmapi/         # Multi-Provider Free LLM Proxy (Node.js 22, SQLite on POSIX storage)
-│   ├── evolution/          # Native WhatsApp Engine (Go whatsmeow, NATS JetStream event stream)
-│   └── hermes/             # Autonomous Copilot (Python 3.12 Ubuntu invariant, ChatML, NATS bridge)
+│   ├── astrobranding/      # [Runtime 1] Unified Fullstack (Astro 5 SSR + React 19 Islands + Hono + BullMQ) [:3000]
+│   │   ├── src/
+│   │   │   ├── components/ # React 19 Islands: /app (Dossier) & /desk (Cockpit)
+│   │   │   ├── pages/      # Astro 5 SSR: /, /gratis, /checkout, /docs, /app, /desk, /api/[...path]
+│   │   │   ├── server/     # Hono API Router, BullMQ queues & Bull Board dashboard
+│   │   │   └── workers/    # Dedicated BullMQ background job processors
+│   ├── bifrost/            # [Runtime 2] Maxim AI Enterprise Gateway (Go v2.0.0, CEL routing, Valkey cache) [:8080]
+│   ├── freellmapi/         # [Runtime 3] Multi-Provider Free LLM Proxy (Node.js 22, SQLite on POSIX storage) [:3001]
+│   ├── evolution/          # [Runtime 4] Native WhatsApp Engine (Go whatsmeow, NATS JetStream events) [:8085]
+│   └── hermes/             # [Runtime 5] Autonomous Copilot (Python 3.12, NATS JetStream daemon, stdlib health) [:8000]
 ├── packages/
-│   ├── contracts/          # Zod 4 Schemas & Universal DTOs (SSoT)
-│   ├── database/           # PostgreSQL 18 + pgvector HNSW + native uuidv7() (Drizzle ORM)
-│   └── engine/             # Typed Microservice SDKs (Bifrost, FreeLLMAPI, Evolution, NATS)
+│   ├── contracts/          # Zod 4 Schemas, CoachStrategicProfile & Universal DTOs (SSoT)
+│   ├── database/           # PostgreSQL 18 (pgvector HNSW + uuidv7() + Transactional Outbox Pattern)
+│   └── engine/             # Typed Microservice SDKs (Bifrost, FreeLLMAPI, Evolution, Hermes)
 ├── scripts/
+│   ├── architecture-check.mjs # Static Architecture Guardian (DDD-lite boundary enforcement)
 │   └── bootstrap.mjs       # Clean-Room Bootstrapper for fresh containers and agents
 ├── .github/workflows/
 │   └── deploy.yaml         # Immutable CI/CD Delivery via zeropsio/actions@v1.0.2
@@ -50,54 +54,35 @@ The bootstrapper automatically:
 1. Copies `.env.example` to `.env` if not present.
 2. Installs workspace dependencies via `bun install`.
 3. Validates Zerops platform manifests via `zcp-validate yaml import.yaml`.
-4. Compiles the Astro static site and Vite React webapp with exit code 0.
+4. Enforces architecture boundaries via `scripts/architecture-check.mjs`.
+5. Compiles the Astro 5 SSR standalone server and React 19 client islands with exit code 0.
 
 ---
 
 ## 🛠️ Development Commands
 
 ```bash
-# Start Core API Gateway on port :3000 (with /admin/queues Bull Board)
+# Start unified fullstack dev server on port :3000
 bun run dev
 
-# Start Astro 5 website dev server on port :4321
-bun run dev:website
-
-# Start React 19 webapp dev server on port :5173
-bun run dev:webapp
-
-# Build all applications and packages
+# Build all workspaces
 bun run build
+
+# Run Architecture Guardian check
+bun run check:arch
+
+# Start production Astro SSR server
+bun run start
 ```
 
 ---
 
-## 🌐 The 10-Service Sovereign Mesh
+## 🌐 Public Routes & Commercial Funnel
 
-| Service | Type / Base | Port | Description |
-|---|---|---|---|
-| **`astrobranding`** | `ubuntu/bun@1.3.9` | `:3000` | Hono API + BullMQ queue processing + Bull Board (`/admin/queues`) |
-| **`bifrost`** | `alpine/go@1.22` | `:8080` | Maxim AI Gateway with CEL adaptive routing and Valkey semantic cache |
-| **`freellmapi`** | `ubuntu/nodejs@22` | `:3001` | Multi-provider free LLM proxy (34+ providers) with persistent SQLite |
-| **`evolution`** | `alpine/go@1.22` | `:8085` | Native WhatsApp messaging engine streaming webhooks to NATS JetStream |
-| **`hermes`** | `ubuntu/python@3.12` | `:8000` | Nous Research Hermes-Agent autonomous copilot with ChatML loop |
-| **`database`** | `postgresql:single@18` | `:5432` | PostgreSQL 18 with `pgvector` HNSW indexes and native `uuidv7()` |
-| **`valkey`** | `valkey:single@7.2` | `:6379` | In-memory cache, rate limiting, and BullMQ queue backend |
-| **`nats`** | `nats:single@2.12` | `:4222` | NATS Server JetStream high-speed event and RPC broker |
-| **`objectstorage`** | `object-storage` | S3 | Persistent storage for charts, PDFs, SVGs, and WhatsApp attachments |
-| **`localstorage`** | `local-storage:single@1` | POSIX | Persistent volume for SQLite databases and WhatsApp session keys |
-
----
-
-## 🚢 Deployment on Zerops
-
-1. **Provision Infrastructure**:
-   ```bash
-   zcp-validate yaml import.yaml
-   # Import services into your Zerops project
-   ```
-2. **Push to GitHub**:
-   ```bash
-   git push origin main
-   ```
-   GitHub Actions automatically deploys the 5 runtime services to Zerops using `zeropsio/actions@v1.0.2`.
+- **Landing Page (`/`)**: High-converting Astro 5 SSR landing with instant TTFB (&lt;10ms) and dynamic SEO.
+- **Lead Magnet (`/gratis`)**: Sequential 2-step double opt-in (WhatsApp OTP via EvolutionGo $\to$ Lead in Frappe CRM $\to$ Email via Listmonk).
+- **Checkout Funnel (`/checkout`)**: Pay-what-you-want ($1+ USD) via dLocal Go, Order Bump (Jyotish D10/Shadbala), 1-Click Upsell (BaZi + Kabbalah), Downsell (1:1 Coaching session).
+- **Client Interactive Dossier (`/app`)**: Experiential client portal featuring animated SVG natal wheels and planetary positions.
+- **Coach Strategic Cockpit (`/desk`)**: Private mentor cabinet protected by `COACH_MASTER_KEY` / Google OAuth allowlist. Analyzes Cognitive Architecture, Non-Self defense mechanisms, Tactical Questions, and Leverage Points.
+- **Queues Dashboard (`/admin/queues`)**: Interactive Bull Board monitoring AI, WhatsApp, and astrology background workers.
+- **Technical Documentation (`/docs`)**: Monorepo architecture and API reference.

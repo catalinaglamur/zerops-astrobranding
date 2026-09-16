@@ -40,16 +40,18 @@ if (existsSync("/home/zerops/.local/bin/zcp-validate") || existsSync("/usr/local
   runStep("Validating Zerops Platform Topology", "zcp-validate yaml import.yaml");
 }
 
-// 4. Build Frontends and Typecheck
-runStep("Building Astro Website", "bun run build:website");
-runStep("Building React Vite Webapp", "bun run build:webapp");
+// 4. Architecture Guardian Check
+runStep("Enforcing Architecture Boundaries", "bun scripts/architecture-check.mjs");
+
+// 5. Build Unified Fullstack App (Astro 5 SSR + React 19 + Hono)
+runStep("Building Fullstack AstroBranding App", "bun --filter @astrobranding/astrobranding build");
 
 console.log("==================================================================");
 console.log("🎉 Bootstrap complete! All packages and apps built with exit code 0.");
 console.log("");
 console.log("Available commands:");
-console.log("  • bun run dev           -> Start core API server (port 3000)");
-console.log("  • bun run dev:website   -> Start Astro dev server (port 4321)");
-console.log("  • bun run dev:webapp    -> Start Vite React dev server (port 5173)");
+console.log("  • bun run dev           -> Start unified fullstack dev server (port 3000)");
 console.log("  • bun run build         -> Build all workspaces");
+console.log("  • bun run check:arch    -> Run Architecture Guardian sensor");
+console.log("  • bun run start         -> Start production SSR server");
 console.log("==================================================================\n");

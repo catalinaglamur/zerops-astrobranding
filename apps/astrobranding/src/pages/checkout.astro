@@ -1,0 +1,94 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Funnel Comercial — AstroBranding">
+  <div class="max-w-3xl mx-auto px-6 py-16 font-sans">
+    <a href="/" class="text-xs text-neutral-500 hover:text-neutral-300 font-mono mb-8 inline-block">← Volver al inicio</a>
+
+    <header class="mb-10 text-center">
+      <span class="text-xs uppercase tracking-widest text-indigo-400 font-bold">Checkout Soberano (dLocal Go / Stripe)</span>
+      <h1 class="text-3xl font-extrabold tracking-tight mt-1 text-white">Desbloqueá tu Análisis Arquetípico Completo</h1>
+      <p class="text-neutral-400 text-sm mt-2">
+        Modelo Pay-What-You-Want ($1+ USD). Pagás lo que consideres justo por tu reporte fundacional de 15 Shards.
+      </p>
+    </header>
+
+    <div class="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-8 shadow-xl">
+      <!-- Oferta Principal (Front-end $1+) -->
+      <div class="border-b border-neutral-800 pb-6">
+        <div class="flex justify-between items-start">
+          <div>
+            <span class="text-xs bg-indigo-950 text-indigo-300 px-2 py-0.5 rounded border border-indigo-800/40 font-semibold">Oferta Principal</span>
+            <h3 class="text-lg font-bold text-white mt-2">Dossier AstroBranding Tropical + Sideral (Shards 01 & 02)</h3>
+            <p class="text-xs text-neutral-400 mt-1">24 sistemas de casas, domificación Campanus y arquetipo de marca base.</p>
+          </div>
+          <div class="text-right">
+            <span class="text-xs text-neutral-500 block line-through">$47 USD</span>
+            <span class="text-lg font-extrabold text-indigo-400">Pago Libre ($1+)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Order Bump -->
+      <div class="bg-neutral-950/80 border-2 border-dashed border-amber-500/40 rounded-xl p-5 space-y-2">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="orderBump" class="mt-1 w-4 h-4 rounded text-amber-500 bg-neutral-900 border-neutral-700" />
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">Order Bump Recomendado</span>
+              <span class="text-xs bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded font-mono">+$7 USD</span>
+            </div>
+            <p class="text-sm font-bold text-white mt-1">Desglose Vocacional Védico Jyotish D10 Dasamsa + Shadbala (Shard 03)</p>
+            <p class="text-xs text-neutral-400 mt-0.5">
+              Calcula tus Casas de Riqueza (Artha), Nakshatras predominantes y los 6 factores de fuerza planetaria para maximizar ingresos.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <!-- Upsell Preview -->
+      <div class="bg-neutral-950/40 border border-neutral-800 rounded-xl p-5">
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-neutral-400">1-Click Upsell Posterior:</span>
+          <span class="text-indigo-300 font-semibold">BaZi 4 Pilares + Cábala Tikkun Rav Berg (+$19 USD)</span>
+        </div>
+      </div>
+
+      <!-- Downsell Preview -->
+      <div class="bg-neutral-950/40 border border-neutral-800 rounded-xl p-5">
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-neutral-400">Downsell Estratégico:</span>
+          <span class="text-emerald-300 font-semibold">Sesión Clínica 1 a 1 con el Coach ($150 USD)</span>
+        </div>
+      </div>
+
+      <!-- Formulario de Pago -->
+      <form action="/api/checkout/dlocalgo" method="POST" class="space-y-4 pt-2">
+        <div>
+          <label for="amount" class="block text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-1">Tu Aporte (USD):</label>
+          <div class="relative">
+            <span class="absolute left-4 top-2.5 text-neutral-500 font-bold">$</span>
+            <input
+              type="number"
+              id="amount"
+              name="amount"
+              min="1"
+              value="5"
+              step="1"
+              required
+              class="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-8 pr-4 py-2.5 text-sm text-white font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          class="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 font-bold text-sm text-white transition-all shadow-lg shadow-indigo-600/25 cursor-pointer"
+        >
+          Completar Pago Seguro & Acceder al Dossier →
+        </button>
+      </form>
+    </div>
+  </div>
+</BaseLayout>

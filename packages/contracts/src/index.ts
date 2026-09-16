@@ -1,6 +1,6 @@
-export const CONTRACTS_VERSION = "1.0.0";
-
-export * from "./client";
-export * from "./astrology";
-export * from "./ai";
-export * from "./whatsapp";
+export * from "./client.js";
+export * from "./astrology.js";
+export * from "./ai.js";
+export * from "./whatsapp.js";
+export * from "./coach.js";
+export * from "./outbox.js";

@@ -180,6 +180,9 @@ initWorkers();
 const port = Number(process.env.PORT || 3000);
 console.log(`[AstroBranding] Sovereign Hono Server running on port ${port}`);
 
+export { app };
+export type AppType = typeof app;
+
 export default {
   port,
   fetch: app.fetch,

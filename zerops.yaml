@@ -37,7 +37,7 @@ zerops:
         NATS_URL: ${nats_connectionString}
         BIFROST_GATEWAY_URL: "http://bifrost:8080/v1"
         EVOLUTION_GATEWAY_URL: "http://evolution:8085"
-      start: bun run apps/astrobranding/src/server.ts
+      start: bun run apps/astrobranding/dist/server/entry.mjs
       healthCheck:
         httpGet:
           port: 3000

@@ -4,6 +4,7 @@ import * as schema from "./schema";
 
 export const DATABASE_VERSION = "1.0.0";
 export * from "./schema";
+export * from "./outbox-drain";
 
 const connectionString = process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/astrobranding";
 

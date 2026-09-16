@@ -8,15 +8,11 @@
   ],
   "scripts": {
     "bootstrap": "bun scripts/bootstrap.mjs",
-    "dev": "bun --filter astrobranding dev",
-    "dev:website": "bun --filter @astrobranding/website dev",
-    "dev:webapp": "bun --filter @astrobranding/webapp dev",
+    "dev": "bun --filter @astrobranding/astrobranding dev",
     "build": "bun --filter '*' build",
-    "build:api": "bun --filter astrobranding build",
-    "build:website": "bun --filter @astrobranding/website build",
-    "build:webapp": "bun --filter @astrobranding/webapp build",
-    "start": "bun --filter astrobranding start",
-    "check": "tsc --noEmit"
+    "start": "bun --filter @astrobranding/astrobranding start",
+    "check": "tsc --noEmit",
+    "check:arch": "bun scripts/architecture-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
