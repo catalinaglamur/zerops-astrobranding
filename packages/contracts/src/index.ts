@@ -7,3 +7,5 @@ export * from "./coach";
 export * from "./ai";
 export * from "./whatsapp";
 export * from "./outbox";
+export * from "./payments";
+export * from "./frappe";

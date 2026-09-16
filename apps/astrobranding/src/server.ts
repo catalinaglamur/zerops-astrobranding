@@ -6,9 +6,28 @@ import {
   ChatCompletionRequestSchema,
   WhatsAppSendOtpSchema,
   UniversalBirthInputSchema,
+  CreatePaymentSessionSchema,
+  PaymentGatewayIdSchema,
 } from "@astrobranding/contracts";
-import { bifrost, freellmapi, evolution, executeUniversalExtraction, DIAGNOSTIC_PROMPTS } from "@astrobranding/engine";
-import { db, clients, clientDumps, clientFeeds, checkDatabaseConnection, eq } from "@astrobranding/database";
+import {
+  bifrost,
+  freellmapi,
+  evolution,
+  executeUniversalExtraction,
+  DIAGNOSTIC_PROMPTS,
+  paymentRegistry,
+  frappe,
+} from "@astrobranding/engine";
+import {
+  db,
+  clients,
+  clientDumps,
+  clientFeeds,
+  orders,
+  taskOutbox,
+  checkDatabaseConnection,
+  eq,
+} from "@astrobranding/database";
 import { bullboardServerAdapter, getAiQueue, getWhatsAppQueue, getAstrologyQueue } from "./queues";
 import { initWorkers } from "./workers";
 
@@ -207,6 +226,110 @@ app.post("/api/whatsapp/otp", zValidator("json", WhatsAppSendOtpSchema), async (
   }
   const result = await evolution.sendOtp(input);
   return c.json(result, result.success ? 200 : 500);
+});
+
+// API: Payment Gateways Discovery (Dynamic detection from environment)
+app.get("/api/v1/payments/gateways", (c) => {
+  const active = paymentRegistry.getActiveGateways();
+  return c.json(active);
+});
+
+// API: Create Checkout Session with Selected Gateway (dLocal Go / Wompi / ePayco)
+app.post("/api/v1/payments/create-session", zValidator("json", CreatePaymentSessionSchema), async (c) => {
+  const input = c.req.valid("json");
+  try {
+    // 1. Create Pending Order in PostgreSQL 18
+    const [order] = await db.insert(orders).values({
+      clientId: input.clientId,
+      amount: input.amount.toString(),
+      currency: input.currency,
+      status: "pending",
+    }).returning();
+
+    // 2. Delegate session creation to selected Gateway Driver
+    const session = await paymentRegistry.createSession(input, order.id);
+    return c.json(session, 201);
+  } catch (err: unknown) {
+    console.error("[Payments] Error creating checkout session:", err);
+    return c.json({ success: false, error: err instanceof Error ? err.message : "Payment error" }, 500);
+  }
+});
+
+// API: Unified Webhook Ingestion (/api/webhooks/:gateway)
+app.post("/api/webhooks/:gateway", async (c) => {
+  const gatewayParam = c.req.param("gateway");
+  const parsed = PaymentGatewayIdSchema.safeParse(gatewayParam);
+  if (!parsed.success) {
+    return c.json({ error: `Unsupported gateway: ${gatewayParam}` }, 400);
+  }
+
+  const gateway = parsed.data;
+  const rawBody = await c.req.text();
+  let body: Record<string, any> = {};
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    // URL-encoded form fallback
+    body = Object.fromEntries(new URLSearchParams(rawBody));
+  }
+
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(c.req.header())) {
+    if (v) headers[k.toLowerCase()] = v;
+  }
+
+  const event = paymentRegistry.verifyAndNormalizeWebhook(gateway, headers, body, rawBody);
+  console.log(`[Webhook] Gateway ${gateway} received event ${event.event} for order ${event.orderId}`);
+
+  if (event.event === "payment.approved") {
+    try {
+      // 1. Update Order in PostgreSQL 18
+      await db.update(orders)
+        .set({ status: "paid", paymentRef: event.transactionId })
+        .where(eq(orders.id, event.orderId));
+
+      // 2. Register Outbox Event for Guaranteed Async Processing
+      await db.insert(taskOutbox).values({
+        type: "payment.settled",
+        dedupeKey: `pay-${gateway}-${event.transactionId}`,
+        payload: { orderId: event.orderId, gateway, transactionId: event.transactionId, amount: event.amount },
+        status: "pending",
+      });
+
+      // 3. Sync with Frappe CRM: Record Deal as Won
+      await frappe.createOrUpdateDeal({
+        lead: `CRM-LEAD-${event.orderId.substring(0, 8)}`,
+        deal_value: event.amount,
+        currency: event.currency,
+        status: "Won",
+        email: event.payerEmail,
+      });
+
+      // 4. Sync with ERPNext: Create Customer and Issue Sales Invoice
+      if (event.payerEmail) {
+        await frappe.createCustomer({
+          customer_name: event.payerEmail.split("@")[0] || "Client",
+          email_id: event.payerEmail,
+        });
+
+        await frappe.createSalesInvoice({
+          customer: event.payerEmail.split("@")[0] || "Client",
+          currency: event.currency,
+          items: [{ item_name: "AstroBranding Report", rate: event.amount, amount: event.amount, qty: 1, item_code: "ASTRO-REPORT" }],
+        });
+      }
+    } catch (postErr) {
+      console.error("[Webhook] Error in post-payment processing:", postErr);
+    }
+  }
+
+  return c.json({ received: true, gateway, event: event.event });
+});
+
+// API: Frappe CRM & ERPNext Live Connection Health Probe
+app.get("/api/frappe/status", async (c) => {
+  const status = await frappe.checkConnection();
+  return c.json(status);
 });
 
 // Start background workers

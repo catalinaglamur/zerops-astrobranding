@@ -8,3 +8,5 @@ export * from "./feeds";
 export * from "./orchestrator";
 export * from "./mcp";
 export * from "./prompts/diagnostic-prompts";
+export * from "./payments";
+export * from "./frappe";

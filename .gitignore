@@ -8,3 +8,5 @@ dist/
 .env
 *.log
 .engram
+apps/freellmapi/data/
+*.db
