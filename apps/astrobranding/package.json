@@ -8,6 +8,11 @@
     "build": "echo 'Build complete'"
   },
   "dependencies": {
-    "hono": "^4.7.0"
+    "@astrobranding/contracts": "workspace:*",
+    "@astrobranding/database": "workspace:*",
+    "@astrobranding/engine": "workspace:*",
+    "@hono/zod-validator": "^0.4.3",
+    "hono": "^4.7.0",
+    "zod": "^3.24.2"
   }
 }

@@ -1,6 +1,9 @@
 node_modules/
 .bun/
 dist/
+**/dist/
+**/.astro/
+**/vendor/
 .DS_Store
 .env
 *.log

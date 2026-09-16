@@ -8,9 +8,14 @@
   ],
   "scripts": {
     "dev": "bun --filter astrobranding dev",
-    "build": "bun --filter astrobranding build",
+    "dev:website": "bun --filter @astrobranding/website dev",
+    "dev:webapp": "bun --filter @astrobranding/webapp dev",
+    "build": "bun --filter '*' build",
+    "build:api": "bun --filter astrobranding build",
+    "build:website": "bun --filter @astrobranding/website build",
+    "build:webapp": "bun --filter @astrobranding/webapp build",
     "start": "bun --filter astrobranding start",
-    "check": "bun run --filter '*' check"
+    "check": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",

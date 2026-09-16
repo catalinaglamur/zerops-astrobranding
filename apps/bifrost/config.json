@@ -1,0 +1,36 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "version": "2.0.0",
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0"
+  },
+  "vector_store": {
+    "type": "redis",
+    "address": "valkey:6379",
+    "dimension": 1536
+  },
+  "virtual_keys": [
+    {
+      "id": "vk-production-main",
+      "name": "Production Sovereign Key",
+      "rate_limits": {
+        "requests_per_minute": 120
+      },
+      "models": ["*"]
+    }
+  ],
+  "routing": [
+    {
+      "name": "primary-freellmapi-routing",
+      "cel_expression": "true",
+      "targets": [
+        {
+          "provider": "freellmapi",
+          "base_url": "http://freellmapi:3001/v1",
+          "weight": 1.0
+        }
+      ]
+    }
+  ]
+}

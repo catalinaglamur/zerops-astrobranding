@@ -1,29 +1,162 @@
 zerops:
+  # 1. Main Monorepo Service: Bun 1.4 + Astro 5 + Hono
   - setup: astrobranding
     build:
-      base: ubuntu/bun@1.3.9
+      base: bun@1.3.9
+      os: ubuntu
+      envVariables:
+        BUN_INSTALL: ./.bun
       buildCommands:
         - bun install
+        - bun run build
       deployFiles:
-        - .
+        - apps
+        - packages
+        - node_modules
+        - package.json
+        - bunfig.toml
       cache:
         - node_modules
-        - ~/.bun/install/cache
+        - .bun/install/cache
     deploy:
       readinessCheck:
         httpGet:
           port: 3000
           path: /health
     run:
-      base: ubuntu/bun@1.3.9
+      base: bun@1.3.9
+      os: ubuntu
       ports:
         - port: 3000
           httpSupport: true
       envVariables:
         PORT: 3000
         NODE_ENV: production
+        DATABASE_URL: ${database_connectionString}
+        VALKEY_URL: ${valkey_connectionString}
+        NATS_URL: ${nats_connectionString}
+        BIFROST_GATEWAY_URL: "http://bifrost:8080/v1"
+        EVOLUTION_GATEWAY_URL: "http://evolution:8085"
       start: bun run apps/astrobranding/src/server.ts
       healthCheck:
         httpGet:
           port: 3000
           path: /health
+
+  # 2. Maxim AI Bifrost Enterprise AI Gateway (Go v2.0.0)
+  - setup: bifrost
+    run:
+      base: alpine@3.21
+      ports:
+        - port: 8080
+          httpSupport: true
+      prepareCommands:
+        - apk add --no-cache curl ca-certificates tzdata
+        - curl -fsSL -o /usr/local/bin/bifrost https://github.com/maximhq/bifrost/releases/download/v2.0.0/bifrost-linux-amd64
+        - chmod +x /usr/local/bin/bifrost
+        - mkdir -p /app/data
+      start:
+        exec: /usr/local/bin/bifrost -app-dir /app/data -port 8080 -host 0.0.0.0 -log-level info -log-style json
+      healthCheck:
+        httpGet:
+          port: 8080
+          path: /health
+      envVariables:
+        APP_PORT: "8080"
+        APP_HOST: "0.0.0.0"
+        APP_DIR: "/app/data"
+        GOMEMLIMIT: "900MiB"
+        GOGC: "200"
+        VALKEY_ADDR: "valkey:6379"
+        VALKEY_PASSWORD: ${valkey_password}
+        FREELLMAPI_URL: "http://freellmapi:3001/v1"
+
+  # 3. FreeLLMAPI Multi-Provider Free Inference Proxy (Node.js 22)
+  - setup: freellmapi
+    build:
+      base: nodejs@22
+      os: ubuntu
+      buildCommands:
+        - cd apps/freellmapi && npm install
+      deployFiles:
+        - apps/freellmapi
+      cache:
+        - ~/.npm
+    run:
+      base: nodejs@22
+      os: ubuntu
+      ports:
+        - port: 3001
+          httpSupport: true
+      envVariables:
+        PORT: 3001
+        HOST: "0.0.0.0"
+        NODE_ENV: "production"
+        FREEAPI_DB_PATH: "/mnt/localstorage/freellmapi/freellmapi.db"
+      start: node apps/freellmapi/server.js
+      healthCheck:
+        httpGet:
+          port: 3001
+          path: /api/ping
+
+  # 4. EvolutionGo WhatsApp Engine (Go 1.22)
+  - setup: evolution
+    build:
+      base: go@1.22
+      os: alpine
+      prepareCommands:
+        - apk add --no-cache git gcc musl-dev
+      buildCommands:
+        - cd apps/evolution && go build -o evolution-go main.go
+      deployFiles:
+        - apps/evolution/evolution-go
+      cache:
+        - /go/pkg/mod
+    run:
+      base: alpine@3.21
+      ports:
+        - port: 8085
+          httpSupport: true
+      prepareCommands:
+        - apk add --no-cache ca-certificates tzdata
+      envVariables:
+        SERVER_PORT: "8085"
+        CLIENT_NAME: "astrobranding"
+        POSTGRES_AUTH_DB: "postgresql://${database_user}:${database_password}@database:${database_port}/evogo_auth?sslmode=disable"
+        POSTGRES_USERS_DB: "postgresql://${database_user}:${database_password}@database:${database_port}/evogo_users?sslmode=disable"
+        DATABASE_SAVE_MESSAGES: "true"
+        NATS_URL: ${nats_connectionString}
+      start: ./apps/evolution/evolution-go
+      healthCheck:
+        httpGet:
+          port: 8085
+          path: /server/ok
+
+  # 5. Nous Research Hermes-Agent Copilot (Python 3.12 Ubuntu)
+  - setup: hermes
+    build:
+      base: python@3.12
+      os: ubuntu
+      buildCommands:
+        - cd apps/hermes && pip install --upgrade pip setuptools wheel && pip install --target=./vendor -r requirements.txt
+      deployFiles:
+        - apps/hermes
+      cacheFiles:
+        - /root/.cache/pip
+    run:
+      base: python@3.12
+      os: ubuntu
+      ports:
+        - port: 8000
+          httpSupport: true
+      envVariables:
+        PORT: "8000"
+        PYTHONPATH: "./apps/hermes/vendor:./apps/hermes"
+        HERMES_MODEL_ENDPOINT: "http://bifrost:8080/v1"
+        HERMES_MODEL_NAME: "hermes-3-llama-3.1-8b"
+        ZCP_NATS_URL: ${nats_connectionString}
+      start: python apps/hermes/main.py
+      healthCheck:
+        httpGet:
+          port: 8000
+          path: /healthz
