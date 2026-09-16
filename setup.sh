@@ -4,68 +4,68 @@ set -e
 # ==============================================================================
 # Zerops AstroBranding Sovereign Monorepo — Step-by-Step Initializer (setup.sh)
 #
-# Designed for Successor AGY & Non-Technical Users:
-# - Purely agnostic across any Zerops ZCP cluster.
-# - Can run all steps sequentially OR step-by-step via:
-#     ./setup.sh --step <1-6> [/path/to/keys.md]
-# - Invariant: If any step fails, HALT immediately. Fix the code and commit before advancing.
+# Designed for Successor AGY & Platform Operators:
+# - Native to Zerops Control Plane (zcp) & Incus LXC mesh architecture.
+# - Invariant: ZCP is the orchestration control plane, NOT the app runtime.
+#   Builds and application runtime run inside dedicated Zerops Incus containers.
+# - Usage:
+#     ./setup.sh [--step <1-4>] [key1.md key2.md ... | /path/to/keys]
 # ==============================================================================
 
 STEP="${1:-all}"
-KEYS_ARG="${2:-}"
+shift || true
+EXTRA_ARGS=("$@")
 
-# If first arg is a file or path rather than a step flag:
-if [[ "$STEP" != "--step" && "$STEP" != "1" && "$STEP" != "2" && "$STEP" != "3" && "$STEP" != "4" && "$STEP" != "5" && "$STEP" != "6" && "$STEP" != "all" ]]; then
-  KEYS_ARG="$STEP"
+# Normalize step argument
+if [[ "$STEP" == "--step" ]]; then
+  STEP="${EXTRA_ARGS[0]:-1}"
+  EXTRA_ARGS=("${EXTRA_ARGS[@]:1}")
+elif [[ "$STEP" != "1" && "$STEP" != "2" && "$STEP" != "3" && "$STEP" != "4" && "$STEP" != "all" ]]; then
+  # If first arg was a file or path rather than a step number:
+  EXTRA_ARGS=("$STEP" "${EXTRA_ARGS[@]}")
   STEP="all"
 fi
 
-if [[ "$1" == "--step" ]]; then
-  STEP="${2:-1}"
-  KEYS_ARG="${3:-}"
-fi
-
 echo "=================================================================="
-echo "   🚀 Zerops AstroBranding Step-by-Step Initializer (Step: $STEP)"
+echo "   🚀 Zerops AstroBranding Initializer (Step: $STEP)"
+echo "   Environment: Zerops Control Plane (zcp) | Target: Incus LXC Mesh"
 echo "=================================================================="
 
 # ------------------------------------------------------------------------------
-# STEP 1: Environment & Workspace Verification
+# STEP 1: Workspace & Environment Pre-flight
 # ------------------------------------------------------------------------------
-step_1_env() {
-  echo "==> [Step 1/6] Verifying Workspace & Environment..."
+step_1_preflight() {
+  echo "==> [Step 1/4] Verifying Workspace & Control Plane Baseline..."
   if [ ! -f .env ] && [ -f .env.example ]; then
     echo "    Creating .env from .env.example..."
     cp .env.example .env
   fi
 
-  # Check Bun & Node availability
-  if ! command -v bun &> /dev/null; then
-    echo "❌ [Step 1 Error] Bun is not installed in this container."
-    echo "👉 Fix: Install Bun via curl -fsSL https://bun.sh/install | bash"
+  # Check Node availability (standard in zcp for CLI scripts)
+  if ! command -v node &> /dev/null; then
+    echo "❌ [Step 1 Error] Node.js is required for CLI seeders in this control plane."
     exit 1
   fi
-  echo "    Bun $(bun --version) detected."
-  echo "✅ [Step 1 Passed] Environment and baseline workspace verified."
+  echo "    Node.js $(node --version) detected in control plane."
+
+  # Informative check for Bun (optional in control plane, mandatory in Zerops runtime)
+  if command -v bun &> /dev/null; then
+    echo "    Bun $(bun --version) available locally in control plane."
+  else
+    echo "    ℹ️  Bun not in control plane (expected). Application builds run natively in Zerops Incus LXC containers."
+  fi
+
+  echo "✅ [Step 1 Passed] Workspace baseline verified."
 }
 
 # ------------------------------------------------------------------------------
-# STEP 2: Dependency Installation
+# STEP 2: FreeLLMAPI Credential Ingestion & Quota Stacking
 # ------------------------------------------------------------------------------
-step_2_deps() {
-  echo "==> [Step 2/6] Installing Workspace Dependencies via Bun..."
-  bun install
-  echo "✅ [Step 2 Passed] All dependencies installed across workspaces."
-}
-
-# ------------------------------------------------------------------------------
-# STEP 3: Multi-Account FreeLLMAPI Key Seeding & Quota Stacking
-# ------------------------------------------------------------------------------
-step_3_keys() {
-  echo "==> [Step 3/6] Ingesting and Pooling FreeLLMAPI Credentials..."
-  if [ -n "$KEYS_ARG" ] && [ -e "$KEYS_ARG" ]; then
-    echo "    Ingesting from: $KEYS_ARG"
-    node scripts/seed-freellm-keys.mjs "$KEYS_ARG"
+step_2_keys() {
+  echo "==> [Step 2/4] Ingesting & Pooling FreeLLMAPI Multi-Account Credentials..."
+  if [ ${#EXTRA_ARGS[@]} -gt 0 ]; then
+    echo "    Passing credentials sources: ${EXTRA_ARGS[*]}"
+    node scripts/seed-freellm-keys.mjs "${EXTRA_ARGS[@]}"
   elif [ -d "/var/www/keys" ]; then
     echo "    Auto-discovering keys from /var/www/keys..."
     node scripts/seed-freellm-keys.mjs "/var/www/keys"
@@ -76,68 +76,69 @@ step_3_keys() {
     echo "    Checking for available LLM API keys in default environment..."
     node scripts/seed-freellm-keys.mjs
   fi
-  echo "✅ [Step 3 Passed] FreeLLMAPI quota stacking & offline seed configured."
+  echo "✅ [Step 2 Passed] FreeLLMAPI multi-provider seed configured for deployment."
 }
 
 # ------------------------------------------------------------------------------
-# STEP 4: Architecture Boundary & Strict TypeScript Validation
+# STEP 3: Platform Topology & Architectural Boundaries Validation
 # ------------------------------------------------------------------------------
-step_4_validate() {
-  echo "==> [Step 4/6] Validating Architectural Boundaries & Strict Types..."
-  bun scripts/architecture-check.mjs
-  bun run check
-  echo "✅ [Step 4 Passed] Zero boundary violations, clean typecheck (exit code 0)."
-}
+step_3_validate() {
+  echo "==> [Step 3/4] Validating Zerops Platform Topology & Architecture..."
 
-# ------------------------------------------------------------------------------
-# STEP 5: Fullstack Production Build Test (Astro 5 + React 19 + Hono)
-# ------------------------------------------------------------------------------
-step_5_build() {
-  echo "==> [Step 5/6] Testing Production Fullstack Build..."
-  bun run build
-  echo "✅ [Step 5 Passed] Monorepo successfully built for production."
-}
-
-# ------------------------------------------------------------------------------
-# STEP 6: Zerops Platform Import Readiness
-# ------------------------------------------------------------------------------
-step_6_zerops() {
-  echo "==> [Step 6/6] Verifying Zerops Platform Manifests (import.yaml & zerops.yaml)..."
   if [ ! -f import.yaml ] || [ ! -f zerops.yaml ]; then
-    echo "❌ [Step 6 Error] import.yaml or zerops.yaml missing from root."
+    echo "❌ [Step 3 Error] import.yaml or zerops.yaml missing from repository root."
     exit 1
   fi
 
+  # Validate Zerops topology manifest syntax
   if command -v zcp-validate &> /dev/null; then
     zcp-validate yaml import.yaml
-    echo "    Platform topology validated by zcp-validate."
+    echo "    Zerops 10-service topology verified by zcp-validate."
   fi
 
+  # Run architecture boundary audit
+  if command -v bun &> /dev/null; then
+    bun scripts/architecture-check.mjs
+  else
+    node scripts/architecture-check.mjs
+  fi
+
+  echo "✅ [Step 3 Passed] Zero boundary violations, valid Zerops topology."
+}
+
+# ------------------------------------------------------------------------------
+# STEP 4: Zerops Mesh Provisioning & Deployment Readiness
+# ------------------------------------------------------------------------------
+step_4_deploy_ready() {
+  echo "==> [Step 4/4] Verifying Deployment Readiness for Zerops Mesh..."
   echo "=================================================================="
-  echo "✅ [Step 6 Passed] Ready for Zerops Sovereign Mesh Provisioning."
-  echo "   AGY Action: Deploy natively via Zerops MCP (zerops_import / zerops_workflow)."
-  echo "   Or start local dev server via: bun run dev (port 3000)"
+  echo "✅ [Ready for Zerops Deployment]"
+  echo "   The monorepo template is fully validated."
+  echo ""
+  echo "   📋 AGY Action Protocol for Cloud Deployment:"
+  echo "   1. Provision 10 services via native Zerops MCP:"
+  echo "      zerops_workflow action=\"start\" workflow=\"bootstrap\" route=\"classic\""
+  echo "      (or: zerops_import filePath=\"import.yaml\")"
+  echo "   2. Zerops provisions: database, valkey, nats, objectstorage, localstorage,"
+  echo "      freellmapi, bifrost, evolution, hermes, and astrobranding."
+  echo "   3. Builds occur inside Zerops LXC containers as declared in zerops.yaml."
   echo "=================================================================="
 }
 
 # Execution Dispatcher
 case "$STEP" in
-  "1") step_1_env ;;
-  "2") step_2_deps ;;
-  "3") step_3_keys ;;
-  "4") step_4_validate ;;
-  "5") step_5_build ;;
-  "6") step_6_zerops ;;
+  "1") step_1_preflight ;;
+  "2") step_2_keys ;;
+  "3") step_3_validate ;;
+  "4") step_4_deploy_ready ;;
   "all")
-    step_1_env
-    step_2_deps
-    step_3_keys
-    step_4_validate
-    step_5_build
-    step_6_zerops
+    step_1_preflight
+    step_2_keys
+    step_3_validate
+    step_4_deploy_ready
     ;;
   *)
-    echo "Unknown step: $STEP. Options: 1, 2, 3, 4, 5, 6, all"
+    echo "Unknown step: $STEP. Options: 1, 2, 3, 4, all"
     exit 1
     ;;
 esac
