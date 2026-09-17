@@ -19,6 +19,7 @@ import type {
 import type { ClientRequestOptions } from "./types";
 import { callKundaliMcp, callBaziLunarMcp, callZmanimMcp } from "../mcp";
 import { calculateTikkunBerg } from "../tikkun";
+import { providerBuckets } from "./rate-limiter";
 
 const ASTROWAY_URL = process.env.ASTROWAY_URL || "https://api.astroway.info";
 const VEDASTRO_URL = process.env.VEDASTRO_URL || "https://api.vedastro.org";
@@ -85,35 +86,45 @@ export async function fetchWesternTropical(
   let royalStars: any[] = [];
   let psychologicalThemes: Record<string, any> = {};
 
-  // Parallel multi-provider calls with graceful degradation
+  // Parallel multi-provider calls throttled by provider-specific rate-limit buckets
   const tasks = await Promise.allSettled([
-    // FreeAstroAPI Natal + SVG Wheel
+    // FreeAstroAPI Natal + SVG Wheel (Plan Pro $8/mo - 4.0 req/s bucket)
     freeAstroKey
-      ? fetch(`${FREEASTRO_URL}/api/v1/natal/calculate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": freeAstroKey },
-          body: JSON.stringify({
-            year: parseInt(input.date.split("-")[0], 10),
-            month: parseInt(input.date.split("-")[1], 10),
-            date: parseInt(input.date.split("-")[2], 10),
-            hours: parseInt(input.time.split(":")[0], 10),
-            minutes: parseInt(input.time.split(":")[1], 10),
-            latitude: input.latitude,
-            longitude: input.longitude,
-            house_system: "placidus",
-          }),
-          signal: options.signal,
-        }).then(r => r.ok ? r.json() : null)
+      ? providerBuckets.freeastro.execute(() =>
+          fetch(`${FREEASTRO_URL}/api/v1/natal/calculate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": freeAstroKey },
+            body: JSON.stringify({
+              year: parseInt(input.date.split("-")[0], 10),
+              month: parseInt(input.date.split("-")[1], 10),
+              date: parseInt(input.date.split("-")[2], 10),
+              hours: parseInt(input.time.split(":")[0], 10),
+              minutes: parseInt(input.time.split(":")[1], 10),
+              latitude: input.latitude,
+              longitude: input.longitude,
+              house_system: "placidus",
+            }),
+            signal: options.signal,
+          }).then(async (r) => {
+            if (!r.ok) throw new Error(`FreeAstroAPI failed with HTTP ${r.status}`);
+            return r.json();
+          })
+        )
       : Promise.resolve(null),
 
-    // AstroWay Psychological themes
+    // AstroWay Psychological themes (Indie PRO - 0.4 req/s bucket)
     astroWayKey
-      ? fetch(`${ASTROWAY_URL}/v1/psychological/modern/arroyo/water-houses-trauma`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${astroWayKey}` },
-          body: JSON.stringify({ datetime: `${input.date}T${input.time}:00Z`, latitude: input.latitude, longitude: input.longitude }),
-          signal: options.signal,
-        }).then(r => r.ok ? r.json() : null)
+      ? providerBuckets.astroway.execute(() =>
+          fetch(`${ASTROWAY_URL}/v1/psychological/modern/arroyo/water-houses-trauma`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${astroWayKey}` },
+            body: JSON.stringify({ datetime: `${input.date}T${input.time}:00Z`, latitude: input.latitude, longitude: input.longitude }),
+            signal: options.signal,
+          }).then(async (r) => {
+            if (!r.ok) throw new Error(`AstroWay failed with HTTP ${r.status}`);
+            return r.json();
+          })
+        )
       : Promise.resolve(null),
   ]);
 
@@ -297,46 +308,58 @@ export async function fetchVedicJyotish(
   let grahaDrishti: Record<string, any> | undefined;
   let panchang: Record<string, any> | undefined;
 
-  // Multi-provider parallel ingestion
+  // Multi-provider parallel ingestion governed by rate-limit token buckets
   await Promise.allSettled([
-    // 1. VedAstro REST
+    // 1. VedAstro REST ($1/mo Unlimited - 1.5 req/s bucket)
     vedastroKey
-      ? fetch(`${VEDASTRO_URL}/Calculate/AllPlanetData/Location/${encodeURIComponent(input.city)}/Time/${input.time}/${input.date}/+00:00`, {
-          headers: { "Content-Type": "application/json", "API-Key": vedastroKey },
-          signal: options.signal,
-        })
-          .then(r => r.ok ? r.json() : null)
-          .then(data => {
-            if (data?.lagna) lagna = data.lagna;
-            if (data?.shodashavarga) shodashavarga = { ...shodashavarga, ...data.shodashavarga };
-            if (data?.shadbala) shadbala = { ...shadbala, ...data.shadbala };
-            if (data?.yogas) yogas = data.yogas;
+      ? providerBuckets.vedastro.execute(() =>
+          fetch(`${VEDASTRO_URL}/Calculate/AllPlanetData/Location/${encodeURIComponent(input.city)}/Time/${input.time}/${input.date}/+00:00`, {
+            headers: { "Content-Type": "application/json", "API-Key": vedastroKey },
+            signal: options.signal,
           })
+            .then(async (r) => {
+              if (!r.ok) throw new Error(`VedAstro failed with HTTP ${r.status}`);
+              return r.json();
+            })
+            .then((data: any) => {
+              if (data?.lagna) lagna = data.lagna;
+              if (data?.shodashavarga) shodashavarga = { ...shodashavarga, ...data.shodashavarga };
+              if (data?.shadbala) shadbala = { ...shadbala, ...data.shadbala };
+              if (data?.yogas) yogas = data.yogas;
+            })
+        )
       : Promise.resolve(),
 
-    // 2. FreeAstroAPI KP V2
+    // 2. FreeAstroAPI KP V2 ($8/mo Pro - 4.0 req/s bucket)
     freeastroKey
-      ? fetch(`${FREEASTRO_URL}/api/v2/vedic/kp`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": freeastroKey },
-          body: JSON.stringify({ date: input.date, time: input.time, latitude: input.latitude, longitude: input.longitude }),
-          signal: options.signal,
-        })
-          .then(r => r.ok ? r.json() : null)
-          .then(data => {
-            if (data?.significators) kpSignificators = data.significators;
+      ? providerBuckets.freeastro.execute(() =>
+          fetch(`${FREEASTRO_URL}/api/v2/vedic/kp`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": freeastroKey },
+            body: JSON.stringify({ date: input.date, time: input.time, latitude: input.latitude, longitude: input.longitude }),
+            signal: options.signal,
           })
+            .then(async (r) => {
+              if (!r.ok) throw new Error(`FreeAstroAPI KP failed with HTTP ${r.status}`);
+              return r.json();
+            })
+            .then((data: any) => {
+              if (data?.significators) kpSignificators = data.significators;
+            })
+        )
       : Promise.resolve(),
 
-    // 3. Kundali MCP
-    callKundaliMcp("kundali", { date: input.date, time: input.time, latitude: input.latitude, longitude: input.longitude }, options)
-      .then(res => {
-        if (res?.result) {
-          if (res.result.lagna) lagna = { ...lagna, ...res.result.lagna };
-          if (res.result.panchang) panchang = res.result.panchang;
-          if (res.result.yogas) yogas = [...yogas, ...res.result.yogas];
-        }
-      }),
+    // 3. Kundali MCP (Remote Streamable HTTPS - 2.0 req/s bucket)
+    providerBuckets.kundali.execute(() =>
+      callKundaliMcp("kundali", { date: input.date, time: input.time, latitude: input.latitude, longitude: input.longitude }, options)
+        .then((res) => {
+          if (res?.result) {
+            if (res.result.lagna) lagna = { ...lagna, ...res.result.lagna };
+            if (res.result.panchang) panchang = res.result.panchang;
+            if (res.result.yogas) yogas = [...yogas, ...res.result.yogas];
+          }
+        })
+    ),
   ]);
 
   return {
