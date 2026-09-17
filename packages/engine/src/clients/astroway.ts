@@ -146,6 +146,7 @@ export async function fetchBaZiMetaphysics(
   if (options.dryRun || !process.env.ASTROWAY_API_KEY) {
     return {
       source: "astroway_bazi_mcp",
+      timeStandard: "true_solar",
       fourPillars: {
         year: { stem: "Jia", branch: "Chen", element: "Wood Dragon" },
         month: { stem: "Bing", branch: "Yin", element: "Fire Tiger" },
@@ -214,6 +215,7 @@ export async function fetchBaZiMetaphysics(
 
   return {
     source: "astroway_bazi_mcp",
+    timeStandard: "true_solar",
     fourPillars,
     dayMaster,
     wuXingPercentages,

@@ -18,9 +18,9 @@ export const UniversalBirthInputSchema = z.object({
 
 export type UniversalBirthInput = z.infer<typeof UniversalBirthInputSchema>;
 
-// Shard 1: Western Tropical (AstroWay / FreeAstroAPI)
+// Shard 1: Western Tropical (FreeAstroAPI / Astrology-API.io / AstroWay)
 export const WesternTropicalShardSchema = z.object({
-  source: z.literal("astroway_freeastroapi"),
+  source: z.string().default("multi_provider_tropical"),
   zodiac: z.literal("tropical"),
   houseSystem: z.string().default("placidus"),
   ascendant: z.number(),
@@ -41,13 +41,16 @@ export const WesternTropicalShardSchema = z.object({
     orb: z.number(),
   })).optional(),
   arabicParts: z.record(z.string(), z.number()).optional(),
+  svgChartWheel: z.string().optional(),
+  royalStars: z.array(z.any()).optional(),
+  psychologicalThemes: z.record(z.string(), z.any()).optional(),
 });
 
-// Shard 2: Western Sidereal (Astrology-API.io / FreeAstroAPI)
+// Shard 2: Western Sidereal (Astrology-API.io / FreeAstroAPI / AstroWay)
 export const WesternSiderealShardSchema = z.object({
-  source: z.literal("astrologyapi_freeastroapi"),
+  source: z.string().default("multi_provider_sidereal"),
   zodiac: z.literal("sidereal"),
-  ayanamsa: z.enum(["fagan_bradley", "lahiri"]).default("fagan_bradley"),
+  ayanamsa: z.string().default("fagan_bradley"),
   houseSystem: z.string().default("campanus"),
   planets: z.record(z.string(), z.object({
     longitude: z.number(),
@@ -56,30 +59,36 @@ export const WesternSiderealShardSchema = z.object({
     house: z.number(),
   })),
   mundoscopeHouses: z.record(z.string(), z.number()).optional(),
+  fixedStars: z.array(z.any()).optional(),
+  campanusCusps: z.array(z.number()).optional(),
 });
 
-// Shard 3: Vedic Jyotish (VedAstro PRO / Kundali MCP)
+// Shard 3: Vedic Jyotish (VedAstro PRO / AstroWay / FreeAstro KP / Astrology-API / Kundali MCP)
 export const VedicJyotishShardSchema = z.object({
-  source: z.literal("vedastro_kundali_mcp"),
+  source: z.string().default("multi_provider_vedic"),
   lagna: z.object({
     sign: z.string(),
     degree: z.number(),
     nakshatra: z.string(),
     pada: z.number(),
   }),
-  shodashavarga: z.record(z.string(), z.record(z.string(), z.any())).optional(), // D1 - D60
-  shadbala: z.record(z.string(), z.number()).optional(), // 6 factors
+  shodashavarga: z.record(z.string(), z.record(z.string(), z.any())).optional(), // D1 - D60 from AstroWay/VedAstro
+  shadbala: z.record(z.string(), z.number()).optional(), // 6 factors from AstroWay/VedAstro
   yogas: z.array(z.object({
     name: z.string(),
     description: z.string(),
     verbatimCitation: z.string().optional(),
   })).optional(),
+  kpSignificators: z.record(z.string(), z.any()).optional(), // FreeAstroAPI KP V2
+  drikBala: z.record(z.string(), z.any()).optional(), // Astrology-API.io
+  grahaDrishti: z.record(z.string(), z.any()).optional(), // Astrology-API.io
+  panchang: z.record(z.string(), z.any()).optional(), // Kundali MCP
 });
 
-// Shard 4: Vedic Dashas (AstroWay / VedAstro PRO)
+// Shard 4: Vedic Dashas (AstroWay / VedAstro PRO / Kundali MCP)
 export const VedicDashasShardSchema = z.object({
-  source: z.literal("astroway_vedastro"),
-  system: z.literal("vimshottari"),
+  source: z.string().default("multi_provider_dashas"),
+  system: z.string().default("vimshottari"),
   currentDasha: z.object({
     maha: z.string(),
     antar: z.string(),
@@ -90,11 +99,13 @@ export const VedicDashasShardSchema = z.object({
     endDate: z.string(),
   }),
   timeline: z.array(z.any()).optional(),
+  systemsAvailable: z.array(z.string()).optional(),
 });
 
-// Shard 5: BaZi Metaphysics (AstroWay / BaZi-Lunar MCP)
+// Shard 5: BaZi Metaphysics (AstroWay / FreeAstroAPI / BaZi-Lunar MCP)
 export const BaziMetaphysicsShardSchema = z.object({
-  source: z.literal("astroway_bazi_mcp"),
+  source: z.string().default("multi_provider_bazi"),
+  timeStandard: z.string().default("true_solar"),
   fourPillars: z.object({
     year: z.object({ stem: z.string(), branch: z.string(), element: z.string() }),
     month: z.object({ stem: z.string(), branch: z.string(), element: z.string() }),
@@ -102,22 +113,28 @@ export const BaziMetaphysicsShardSchema = z.object({
     hour: z.object({ stem: z.string(), branch: z.string(), element: z.string() }),
   }),
   dayMaster: z.string(),
+  dayMasterStrength: z.number().optional(), // FreeAstroAPI score 0-100
   wuXingPercentages: z.record(z.string(), z.number()),
+  yongShen: z.object({ primary: z.string(), secondary: z.string().optional() }).optional(), // Useful God
+  daYunFlow: z.array(z.any()).optional(), // 10-year luck pillars from FreeAstroAPI
+  shenSha: z.array(z.string()).optional(), // Symbolic stars
   tenGods: z.record(z.string(), z.string()).optional(),
   favorableElements: z.array(z.string()).optional(),
+  auspiciousHours: z.array(z.string()).optional(), // BaZi MCP
 });
 
-// Shard 6: ZiWei Dou Shu & Feng Shui (AstroWay)
+// Shard 6: ZiWei Dou Shu & Feng Shui (AstroWay / BaZi MCP)
 export const ZiweiFengshuiShardSchema = z.object({
-  source: z.literal("astroway"),
+  source: z.string().default("astroway_bazi_mcp"),
   mingPalace: z.string().optional(),
+  twelvePalaces: z.record(z.string(), z.any()).optional(),
   flyingStarsPeriod9: z.record(z.string(), z.any()).optional(),
   fourTransformations: z.record(z.string(), z.string()).optional(), // Lu, Quan, Ke, Ji
 });
 
-// Shard 7: Kabbalah & Gematria (Astrology-API.io / Local Tikkun)
+// Shard 7: Kabbalah & Gematria (Astrology-API.io / FreeAstroAPI / Local Tikkun)
 export const KabbalahGematriaShardSchema = z.object({
-  source: z.literal("astrologyapi_tikkun"),
+  source: z.string().default("multi_provider_kabbalah_numerology"),
   tikkun: z.object({
     sign: z.string(),
     northNodeHouse: z.number(),
@@ -126,12 +143,14 @@ export const KabbalahGematriaShardSchema = z.object({
     bergPrescription: z.string(),
   }),
   gematria: z.record(z.string(), z.number()).optional(), // Ragil, Siduri, Katan, Kolel
+  coreNumbers5Pillars: z.record(z.string(), z.any()).optional(), // Astrology-API.io (Life Path, Soul Urge, etc)
+  fourInOneNumerology: z.record(z.string(), z.any()).optional(), // FreeAstroAPI (Pythagorean, Chaldean, Kabbalah, Vedic)
   sefirotPath: z.string().optional(),
 });
 
 // Shard 8: Hebrew Calendar & Zmanim (Zmanim MCP / HebCal)
 export const HebrewZmanimShardSchema = z.object({
-  source: z.literal("zmanim_mcp_hebcal"),
+  source: z.string().default("hebcal_zmanim_mcp"),
   hebrewDate: z.string(),
   parashat: z.string().optional(),
   zmanim: z.record(z.string(), z.string()).optional(), // sunrise, sunset, shema, etc.
@@ -139,7 +158,7 @@ export const HebrewZmanimShardSchema = z.object({
 
 // Shard 9: Human Design (AstroWay)
 export const HumanDesignShardSchema = z.object({
-  source: z.literal("astroway"),
+  source: z.string().default("astroway_hd"),
   type: z.string(),
   profile: z.string(),
   authority: z.string(),
@@ -153,7 +172,7 @@ export const HumanDesignShardSchema = z.object({
 
 // Shard 10: Cosmobiology Midpoints (AstroWay)
 export const CosmobiologyMidpointsShardSchema = z.object({
-  source: z.literal("astroway"),
+  source: z.string().default("astroway_uranian"),
   dial90Degrees: z.record(z.string(), z.any()).optional(),
   criticalMidpoints: z.array(z.object({
     combination: z.string(),
@@ -164,7 +183,7 @@ export const CosmobiologyMidpointsShardSchema = z.object({
 
 // Shard 11: NASA Horizons Ephemerides (NASA JPL Horizons)
 export const NasaEphemeridesShardSchema = z.object({
-  source: z.literal("nasa_horizons"),
+  source: z.string().default("nasa_jpl_horizons"),
   asteroids: z.record(z.string(), z.object({
     id: z.string(),
     name: z.string(),
@@ -173,28 +192,31 @@ export const NasaEphemeridesShardSchema = z.object({
   })).optional(),
 });
 
-// Shard 12: Astrocartography ACG (FreeAstroAPI / AstroWay)
+// Shard 12: Astrocartography ACG (FreeAstroAPI / AstroWay / Astrology-API.io)
 export const AstrocartographyAcgShardSchema = z.object({
-  source: z.literal("freeastroapi_astroway"),
+  source: z.string().default("multi_provider_acg"),
   majorLines: z.array(z.object({
     planet: z.string(),
     lineType: z.enum(["MC", "IC", "ASC", "DSC"]),
     geoJsonCoordinates: z.array(z.array(z.number())).optional(),
   })),
   localSpaceAzimuths: z.record(z.string(), z.number()).optional(),
+  bestPlacesRanking: z.array(z.any()).optional(), // AstroWay 34k cities
+  parans: z.array(z.any()).optional(),
+  relocationReport: z.record(z.string(), z.any()).optional(),
 });
 
-// Shard 13: Business BG5 Penta (AstroWay)
+// Shard 13: Business BG5 Penta (AstroWay / FreeAstroAPI)
 export const BusinessPentaOrgShardSchema = z.object({
-  source: z.literal("astroway"),
+  source: z.string().default("astroway_freeastro_business"),
   pentaGates: z.array(z.number()).optional(),
   functionalGaps: z.array(z.string()).optional(),
   alphaLeadershipScore: z.number().optional(),
 });
 
-// Shard 14: Partner Synastry & Compatibility (Kundali MCP / FreeAstroAPI / AstroWay)
+// Shard 14: Partner Synastry & Compatibility (FreeAstroAPI / VedAstro PRO / Kundali MCP / BaZi MCP)
 export const PartnerSynastryShardSchema = z.object({
-  source: z.literal("kundali_freeastro_astroway"),
+  source: z.string().default("multi_provider_synastry"),
   ashtakootaGunas: z.object({
     totalScore: z.number().min(0).max(36),
     verdict: z.string(),
@@ -203,10 +225,13 @@ export const PartnerSynastryShardSchema = z.object({
   baziWuXingSynergy: z.string().optional(),
 });
 
-// Shard 15: Predictive & Business Electional (FreeAstroAPI / AstroWay / Kundali MCP)
+// Shard 15: Predictive & Business Electional (Astrology-API.io / AstroWay / FreeAstroAPI / Kundali MCP)
 export const PredictiveElectionalShardSchema = z.object({
-  source: z.literal("freeastro_astroway_kundali"),
-  zodiacalReleasingL1L4: z.array(z.any()).optional(),
+  source: z.string().default("multi_provider_electional"),
+  hellenisticTimeline: z.record(z.string(), z.any()).optional(), // Astrology-API.io timeline
+  zodiacalReleasingL1L4: z.array(z.any()).optional(), // AstroWay
+  electionalSearches: z.record(z.string(), z.any()).optional(), // FreeAstroAPI searches
+  muhurat: z.record(z.string(), z.any()).optional(), // Kundali MCP
   recommendedElectionWindows: z.array(z.object({
     startUtc: z.string(),
     endUtc: z.string(),
