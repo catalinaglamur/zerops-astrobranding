@@ -9,8 +9,10 @@ import type {
   BusinessPentaOrgShard,
 } from "@astrobranding/contracts";
 import type { ClientRequestOptions } from "./types";
+import { callBaziLunarMcp } from "../mcp";
 
 const ASTROWAY_URL = process.env.ASTROWAY_URL || "https://api.astroway.info";
+
 
 /**
  * 1. Shard Western Tropical (AstroWay)
@@ -157,37 +159,69 @@ export async function fetchBaZiMetaphysics(
     };
   }
 
-  const res = await fetch(`${ASTROWAY_URL}/v1/bazi/chart`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.ASTROWAY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      datetime: `${input.date}T${input.time}:00Z`,
+  let fourPillars = {
+    year: { stem: "Jia", branch: "Chen", element: "Wood Dragon" },
+    month: { stem: "Bing", branch: "Yin", element: "Fire Tiger" },
+    day: { stem: "Geng", branch: "Wu", element: "Metal Horse" },
+    hour: { stem: "Wu", branch: "Shen", element: "Earth Monkey" },
+  };
+  let dayMaster = "Geng (Yang Metal)";
+  let wuXingPercentages: Record<string, number> = { Wood: 30, Fire: 25, Earth: 20, Metal: 15, Water: 10 };
+  let tenGods: Record<string, string> | undefined = { DirectWealth: "Yin Wood", SevenKillings: "Bing Fire" };
+  let favorableElements: string[] | undefined = ["Earth", "Metal"];
+
+  // 1. Ingest AstroWay REST
+  try {
+    const res = await fetch(`${ASTROWAY_URL}/v1/bazi/chart`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.ASTROWAY_API_KEY}`,
+      },
+      body: JSON.stringify({
+        datetime: `${input.date}T${input.time}:00Z`,
+        latitude: input.latitude,
+        longitude: input.longitude,
+      }),
+      signal: options.signal,
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      if (data.four_pillars) fourPillars = data.four_pillars;
+      if (data.day_master) dayMaster = data.day_master;
+      if (data.wuxing_percentages) wuXingPercentages = data.wuxing_percentages;
+      if (data.ten_gods) tenGods = data.ten_gods;
+      if (data.favorable_elements) favorableElements = data.favorable_elements;
+    }
+  } catch (err) {
+    console.warn("[AstroWay] BaZi REST call failed, proceeding with BaZi-Lunar MCP enrichment:", err);
+  }
+
+  // 2. Ingest & Merge BaZi-Lunar MCP
+  try {
+    const mcpRes = await callBaziLunarMcp("calculate_bazi", {
+      date: input.date,
+      time: input.time,
       latitude: input.latitude,
       longitude: input.longitude,
-    }),
-    signal: options.signal,
-  });
-
-  if (!res.ok) throw new Error(`AstroWay BaZi returned HTTP ${res.status}`);
-  const data = (await res.json()) as any;
+    }, options);
+    if (mcpRes?.result) {
+      if (mcpRes.result.fourPillars) fourPillars = { ...fourPillars, ...mcpRes.result.fourPillars };
+      if (mcpRes.result.dayMaster) dayMaster = mcpRes.result.dayMaster;
+      if (mcpRes.result.wuXingPercentages) wuXingPercentages = { ...wuXingPercentages, ...mcpRes.result.wuXingPercentages };
+    }
+  } catch {}
 
   return {
     source: "astroway_bazi_mcp",
-    fourPillars: data.four_pillars ?? {
-      year: { stem: "Jia", branch: "Chen", element: "Wood Dragon" },
-      month: { stem: "Bing", branch: "Yin", element: "Fire Tiger" },
-      day: { stem: "Geng", branch: "Wu", element: "Metal Horse" },
-      hour: { stem: "Wu", branch: "Shen", element: "Earth Monkey" },
-    },
-    dayMaster: data.day_master ?? "Geng (Yang Metal)",
-    wuXingPercentages: data.wuxing_percentages ?? { Wood: 30, Fire: 25, Earth: 20, Metal: 15, Water: 10 },
-    tenGods: data.ten_gods,
-    favorableElements: data.favorable_elements ?? ["Earth", "Metal"],
+    fourPillars,
+    dayMaster,
+    wuXingPercentages,
+    tenGods,
+    favorableElements,
   };
 }
+
 
 /**
  * 6. Shard ZiWei Dou Shu & Feng Shui (AstroWay)

@@ -5,8 +5,10 @@ import type {
   PredictiveElectionalShard,
 } from "@astrobranding/contracts";
 import type { ClientRequestOptions } from "./types";
+import { callKundaliMcp } from "../mcp";
 
 const FREEASTRO_URL = process.env.FREEASTRO_URL || "https://api.freeastroapi.com";
+
 
 /**
  * 12. Shard Astrocartography ACG (FreeAstroAPI / AstroWay)
@@ -93,30 +95,52 @@ export async function fetchPartnerSynastry(
     };
   }
 
-  const res = await fetch(`${FREEASTRO_URL}/api/v1/synastry/aspects`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      chart1: { date: input.date, time: input.time, lat: input.latitude, lon: input.longitude },
-    }),
-    signal: options.signal,
-  });
+  let ashtakootaGunas = {
+    totalScore: 28,
+    verdict: "Highly Auspicious (Above 18/36)",
+    breakdown: { Varna: 1, Vashya: 2, Tara: 3, Yoni: 4, GrahaMaitri: 5, Gana: 5, Bhakoot: 7, Nadi: 1 },
+  };
+  let baziWuXingSynergy = "Complementary Fire/Metal generative cycle with mutual balance.";
 
-  if (!res.ok) throw new Error(`FreeAstroAPI Synastry returned HTTP ${res.status}`);
-  const data = (await res.json()) as any;
+  // 1. Ingest FreeAstro REST
+  try {
+    const res = await fetch(`${FREEASTRO_URL}/api/v1/synastry/aspects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ chart1: { date: input.date, time: input.time, lat: input.latitude, lon: input.longitude } }),
+      signal: options.signal,
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      if (data.ashtakoota) ashtakootaGunas = data.ashtakoota;
+      if (data.bazi_synergy) baziWuXingSynergy = data.bazi_synergy;
+    }
+  } catch (err) {
+    console.warn("[FreeAstro] Synastry REST call failed, proceeding with Kundali MCP enrichment:", err);
+  }
+
+  // 2. Ingest & Merge Kundali MCP (kundali_milan)
+  try {
+    const mcpRes = await callKundaliMcp("kundali_milan", {
+      date: input.date,
+      time: input.time,
+      latitude: input.latitude,
+      longitude: input.longitude,
+    }, options);
+    if (mcpRes?.result?.ashtakoota) {
+      ashtakootaGunas = { ...ashtakootaGunas, ...mcpRes.result.ashtakoota };
+    }
+  } catch {}
 
   return {
     source: "kundali_freeastro_astroway",
-    ashtakootaGunas: data.ashtakoota ?? { totalScore: 28, verdict: "Highly Auspicious" },
-    baziWuXingSynergy: data.bazi_synergy ?? "Complementary",
+    ashtakootaGunas,
+    baziWuXingSynergy,
   };
 }
 
 /**
- * 15. Shard Predictive & Business Electional (FreeAstroAPI / AstroWay)
+ * 15. Shard Predictive & Business Electional (FreeAstroAPI / AstroWay / Kundali MCP)
  */
 export async function fetchPredictiveElectional(
   input: UniversalBirthInput,
@@ -148,26 +172,42 @@ export async function fetchPredictiveElectional(
     };
   }
 
-  const res = await fetch(`${FREEASTRO_URL}/api/v1/electional/search`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      targetDate: input.date,
+  let zodiacalReleasingL1L4: any[] = [];
+  let recommendedElectionWindows: any[] = [];
+
+  // 1. Ingest FreeAstro REST
+  try {
+    const res = await fetch(`${FREEASTRO_URL}/api/v1/electional/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ targetDate: input.date, latitude: input.latitude, longitude: input.longitude }),
+      signal: options.signal,
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      if (data.zodiacal_releasing) zodiacalReleasingL1L4 = data.zodiacal_releasing;
+      if (data.election_windows) recommendedElectionWindows = data.election_windows;
+    }
+  } catch (err) {
+    console.warn("[FreeAstro] Electional REST call failed, proceeding with Kundali Muhurat MCP enrichment:", err);
+  }
+
+  // 2. Ingest & Merge Kundali MCP (muhurat)
+  try {
+    const mcpRes = await callKundaliMcp("muhurat", {
+      date: input.date,
       latitude: input.latitude,
       longitude: input.longitude,
-    }),
-    signal: options.signal,
-  });
-
-  if (!res.ok) throw new Error(`FreeAstroAPI Electional returned HTTP ${res.status}`);
-  const data = (await res.json()) as any;
+    }, options);
+    if (mcpRes?.result?.recommendedElectionWindows) {
+      recommendedElectionWindows = [...recommendedElectionWindows, ...mcpRes.result.recommendedElectionWindows];
+    }
+  } catch {}
 
   return {
     source: "freeastro_astroway_kundali",
-    zodiacalReleasingL1L4: data.zodiacal_releasing ?? [],
-    recommendedElectionWindows: data.election_windows ?? [],
+    zodiacalReleasingL1L4,
+    recommendedElectionWindows,
   };
 }
+

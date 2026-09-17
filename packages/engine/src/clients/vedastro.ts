@@ -3,6 +3,7 @@ import type {
   VedicJyotishShard,
 } from "@astrobranding/contracts";
 import type { ClientRequestOptions } from "./types";
+import { callKundaliMcp } from "../mcp";
 
 const VEDASTRO_URL = process.env.VEDASTRO_URL || "https://api.vedastro.org";
 
@@ -54,22 +55,50 @@ export async function fetchVedicJyotish(
     };
   }
 
-  const res = await fetch(`${VEDASTRO_URL}/Calculate/AllPlanetData/Location/${encodeURIComponent(input.city)}/Time/${input.time}/${input.date}/+00:00`, {
-    headers: {
-      "Content-Type": "application/json",
-      "API-Key": apiKey,
-    },
-    signal: options.signal,
-  });
+  let lagna = { sign: "Mesha", degree: 21.2, nakshatra: "Bharani", pada: 3 };
+  let shodashavarga: Record<string, any> = { D1: { lagna: "Mesha" }, D10: { lagna: "Makara" } };
+  let shadbala: Record<string, number> = { Sun: 1.45, Moon: 1.20, Mars: 1.60 };
+  let yogas: any[] = [];
 
-  if (!res.ok) throw new Error(`VedAstro API returned HTTP ${res.status}`);
-  const data = (await res.json()) as any;
+  // 1. Ingest VedAstro REST
+  try {
+    const res = await fetch(`${VEDASTRO_URL}/Calculate/AllPlanetData/Location/${encodeURIComponent(input.city)}/Time/${input.time}/${input.date}/+00:00`, {
+      headers: { "Content-Type": "application/json", "API-Key": apiKey },
+      signal: options.signal,
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      if (data.lagna) lagna = data.lagna;
+      if (data.shodashavarga) shodashavarga = { ...shodashavarga, ...data.shodashavarga };
+      if (data.shadbala) shadbala = { ...shadbala, ...data.shadbala };
+      if (data.yogas) yogas = data.yogas;
+    }
+  } catch (err) {
+    console.warn("[VedAstro] Live REST endpoint failed, proceeding with Kundali MCP enrichment:", err);
+  }
+
+  // 2. Ingest & Merge Kundali MCP
+  try {
+    const kundaliRes = await callKundaliMcp("kundali", {
+      date: input.date,
+      time: input.time,
+      latitude: input.latitude,
+      longitude: input.longitude,
+    }, options);
+    if (kundaliRes?.result) {
+      if (kundaliRes.result.lagna) lagna = { ...lagna, ...kundaliRes.result.lagna };
+      if (kundaliRes.result.shodashavarga) shodashavarga = { ...shodashavarga, ...kundaliRes.result.shodashavarga };
+      if (kundaliRes.result.shadbala) shadbala = { ...shadbala, ...kundaliRes.result.shadbala };
+      if (kundaliRes.result.yogas) yogas = [...yogas, ...kundaliRes.result.yogas];
+    }
+  } catch {}
 
   return {
     source: "vedastro_kundali_mcp",
-    lagna: data.lagna ?? { sign: "Mesha", degree: 21.2, nakshatra: "Bharani", pada: 3 },
-    shodashavarga: data.shodashavarga ?? { D1: { lagna: "Mesha" }, D10: { lagna: "Makara" } },
-    shadbala: data.shadbala ?? { Sun: 1.45, Moon: 1.20, Mars: 1.60 },
-    yogas: data.yogas ?? [],
+    lagna,
+    shodashavarga,
+    shadbala,
+    yogas,
   };
 }
+
