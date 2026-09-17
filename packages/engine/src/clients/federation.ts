@@ -20,6 +20,7 @@ import type { ClientRequestOptions } from "./types";
 import { callKundaliMcp, callBaziLunarMcp, callZmanimMcp } from "../mcp";
 import { calculateTikkunBerg } from "../tikkun";
 import { providerBuckets } from "./rate-limiter";
+import { calculateNativeBazi, calculateNativeHebrewZmanim } from "../native";
 
 const ASTROWAY_URL = process.env.ASTROWAY_URL || "https://api.astroway.info";
 const VEDASTRO_URL = process.env.VEDASTRO_URL || "https://api.vedastro.org";
@@ -429,34 +430,14 @@ export async function fetchBaZiMetaphysics(
   input: UniversalBirthInput,
   options: ClientRequestOptions = { dryRun: true }
 ): Promise<BaziMetaphysicsShard> {
+  // 1. Native High-Speed Bun BaZi Calculation (sub-millisecond pure offline execution)
+  const nativeBazi = calculateNativeBazi(input.date, input.time, input.latitude, input.longitude);
+
   const astrowayKey = process.env.ASTROWAY_API_KEY;
   const freeastroKey = process.env.FREEASTRO_API_KEY;
 
   if (options.dryRun || (!astrowayKey && !freeastroKey)) {
-    return {
-      source: "multi_provider_bazi",
-      timeStandard: "true_solar",
-      fourPillars: {
-        year: { stem: "Jia", branch: "Chen", element: "Wood/Earth" },
-        month: { stem: "Bing", branch: "Yin", element: "Fire/Wood" },
-        day: { stem: "Geng", branch: "Wu", element: "Metal/Fire" },
-        hour: { stem: "Wu", branch: "Shen", element: "Earth/Metal" },
-      },
-      dayMaster: "Geng (Yang Metal)",
-      dayMasterStrength: 72, // FreeAstroAPI score
-      wuXingPercentages: { Wood: 25, Fire: 20, Earth: 15, Metal: 30, Water: 10 },
-      yongShen: { primary: "Water", secondary: "Wood" },
-      daYunFlow: [
-        { age: 10, pillar: "Ding-Mao", startYear: 2004 },
-        { age: 20, pillar: "Wu-Chen", startYear: 2014 },
-        { age: 30, pillar: "Ji-Si", startYear: 2024 },
-        { age: 40, pillar: "Geng-Wu", startYear: 2034 },
-      ],
-      shenSha: ["Tian Yi Gui Ren (Noble)", "Wen Chang (Academic Star)", "Yi Ma (Traveling Horse)"],
-      tenGods: { yearStem: "Direct Wealth", monthStem: "Seven Killings", hourStem: "Direct Resource" },
-      favorableElements: ["Water", "Wood"],
-      auspiciousHours: ["09:00-11:00 (Si)", "15:00-17:00 (Shen)"],
-    };
+    return nativeBazi;
   }
 
   let fourPillars = {
@@ -589,21 +570,14 @@ export async function fetchHebrewZmanim(
   input: UniversalBirthInput,
   options: ClientRequestOptions = { dryRun: true }
 ): Promise<HebrewZmanimShard> {
-  return {
-    source: "hebcal_zmanim_mcp",
-    hebrewDate: "15 Shevat 5786 (Tu BiShvat)",
-    parashat: "Beshalach",
-    zmanim: {
-      alotHaShachar: "05:12",
-      sunrise: "06:34",
-      shemaGra: "09:15",
-      tefilaGra: "10:12",
-      chatzot: "12:04",
-      minchaGedola: "12:35",
-      plagHaMincha: "16:45",
-      sunset: "17:34",
-    },
-  };
+  // Native Bun sub-millisecond calculation via @hebcal/core
+  return calculateNativeHebrewZmanim(
+    input.date,
+    input.time,
+    input.latitude,
+    input.longitude,
+    input.timezone
+  );
 }
 
 /**

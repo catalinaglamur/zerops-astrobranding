@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@astrobranding/contracts": "workspace:*",
-    "@astrobranding/database": "workspace:*"
+    "@astrobranding/database": "workspace:*",
+    "@hebcal/core": "6.9.2",
+    "lunar-javascript": "1.7.7"
   }
 }
