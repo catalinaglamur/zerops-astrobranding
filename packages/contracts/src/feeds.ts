@@ -8,6 +8,8 @@ import { z } from "zod";
  * 4. Diag A-E: Reportes Avanzados de Profundización
  */
 export const GoldFeedTypeSchema = z.enum([
+  // Autor y Constitución Ontológica (Fase 0)
+  "fase_0_author", // Constitución Ontológica del Autor y Gabinete Clínico
   // Reporte Básico del Cliente (Fases 1 a 9)
   "fase_1_num", // Numerología Pitagórica & Identidad de Marca
   "fase_2_occ", // Astrología Occidental Tropical (Placidus)

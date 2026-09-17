@@ -6,9 +6,9 @@
  *   node scripts/seed-freellm-keys.mjs [file1.md file2.md ... | /path/to/keys-dir] [freellmapi_url]
  *
  * Agnostic quota-stacking seeder:
- * - Scans multiple markdown files / accounts (e.g., baiosfera_freellm.md, damaren_freellm.md)
+ * - Scans markdown credential files (.md) and env files (.env, KEY=VALUE)
  * - Ingests provider keys per account into FreeLLMAPI REST /admin/seed
- * - Writes offline fallback seed.json for cold boots
+ * - Writes offline fallback seed.json for cold boots without erasing existing seeds
  */
 
 import fs from "node:fs";
@@ -29,11 +29,9 @@ for (const arg of args) {
     if (stat.isDirectory()) {
       const files = fs.readdirSync(arg);
       for (const f of files) {
-        if (f.endsWith(".md")) {
-          fileCandidates.push(path.resolve(arg, f));
-        }
+        fileCandidates.push(path.resolve(arg, f));
       }
-    } else if (stat.isFile() && arg.endsWith(".md")) {
+    } else if (stat.isFile()) {
       fileCandidates.push(path.resolve(arg));
     }
   }
@@ -47,7 +45,7 @@ if (fileCandidates.length === 0) {
       const stat = fs.statSync(ef);
       if (stat.isDirectory()) {
         for (const f of fs.readdirSync(ef)) {
-          if (f.endsWith(".md")) fileCandidates.push(path.resolve(ef, f));
+          fileCandidates.push(path.resolve(ef, f));
         }
       } else if (stat.isFile()) {
         fileCandidates.push(path.resolve(ef));
@@ -59,13 +57,15 @@ if (fileCandidates.length === 0) {
     "/var/www/keys",
     "/var/www/keys.md",
     "/var/www/.env",
+    "/var/www/baiosfera/0ZEROPS-AGY/users-apis/ElPlacerDC/elplacerdc.md",
+    "/var/www/baiosfera/0ZEROPS-AGY/users-apis/api_keys_global",
   ];
   for (const loc of defaultLocations) {
     if (fs.existsSync(loc)) {
       const stat = fs.statSync(loc);
       if (stat.isDirectory()) {
         for (const f of fs.readdirSync(loc)) {
-          if (f.endsWith(".md")) fileCandidates.push(path.resolve(loc, f));
+          fileCandidates.push(path.resolve(loc, f));
         }
       } else if (stat.isFile()) {
         fileCandidates.push(path.resolve(loc));
@@ -75,13 +75,13 @@ if (fileCandidates.length === 0) {
 }
 
 if (fileCandidates.length === 0) {
-  console.log(`[Info] No markdown credentials files found. FreeLLMAPI will run with env vars or empty seed.`);
+  console.log(`[Info] No credentials files found. FreeLLMAPI will run with environment variables or existing seed.`);
   process.exit(0);
 }
 
 // Deduplicate candidate paths
 const uniqueFiles = [...new Set(fileCandidates)];
-console.log(`\n==> [FreeLLMAPI Seeder] Discovered ${uniqueFiles.length} credentials file(s):`);
+console.log(`\n==> [FreeLLMAPI Seeder] Discovered ${uniqueFiles.length} credentials candidate file(s):`);
 uniqueFiles.forEach((f) => console.log(`    - ${f}`));
 
 const seedPayloadFiles = [];
@@ -99,7 +99,7 @@ for (const fpath of uniqueFiles) {
       label: accountLabel,
     });
 
-    // Parse sections for offline fallback
+    // Pattern 1: Parse markdown sections with ### and **Plataforma:** / **API Key:**
     const sections = raw.split(/###\s+\d+\.\s+/);
     for (const sec of sections) {
       if (!sec.trim()) continue;
@@ -107,12 +107,49 @@ for (const fpath of uniqueFiles) {
       const keyMatch = sec.match(/\*\*API Key:\*\*\s*`([^`]+)`/i);
       const labelMatch = sec.match(/\*\*Etiqueta:\*\*\s*`([^`]+)`/i);
 
-      if (platformMatch && keyMatch) {
+      if (platformMatch && keyMatch && keyMatch[1] && !keyMatch[1].includes("YOUR_")) {
         fallbackFlattenedKeys.push({
           provider: platformMatch[1].trim().toLowerCase(),
           account: accountLabel,
           label: labelMatch ? labelMatch[1].trim() : accountLabel,
           apiKey: keyMatch[1].trim(),
+        });
+      }
+    }
+
+    // Pattern 2: Parse KEY=VALUE lines
+    const lines = raw.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx <= 0) continue;
+      const rawKey = trimmed.substring(0, eqIdx).trim();
+      let rawVal = trimmed.substring(eqIdx + 1).trim();
+      if ((rawVal.startsWith('"') && rawVal.endsWith('"')) || (rawVal.startsWith("'") && rawVal.endsWith("'"))) {
+        rawVal = rawVal.slice(1, -1);
+      }
+      if (!rawVal || rawVal.includes("YOUR_") || rawVal.includes("your_")) continue;
+
+      let provider = null;
+      if (/OPENAI.*KEY/i.test(rawKey)) provider = "openai";
+      else if (/ANTHROPIC.*KEY|CLAUDE.*KEY/i.test(rawKey)) provider = "anthropic";
+      else if (/GEMINI.*KEY|GOOGLE.*AI.*KEY/i.test(rawKey)) provider = "gemini";
+      else if (/GROQ.*KEY/i.test(rawKey)) provider = "groq";
+      else if (/MISTRAL.*KEY/i.test(rawKey)) provider = "mistral";
+      else if (/DEEPSEEK.*KEY/i.test(rawKey)) provider = "deepseek";
+      else if (/COHERE.*KEY/i.test(rawKey)) provider = "cohere";
+      else if (/PERPLEXITY.*KEY/i.test(rawKey)) provider = "perplexity";
+      else if (/OPENROUTER.*KEY/i.test(rawKey)) provider = "openrouter";
+      else if (/TOGETHER.*KEY/i.test(rawKey)) provider = "together";
+      else if (/CEREBRAS.*KEY/i.test(rawKey)) provider = "cerebras";
+
+      if (provider) {
+        fallbackFlattenedKeys.push({
+          provider,
+          account: accountLabel,
+          label: rawKey,
+          apiKey: rawVal,
         });
       }
     }
@@ -157,6 +194,18 @@ async function main() {
     try {
       const dir = path.dirname(st);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      // If no new keys discovered and file already exists with content, do NOT overwrite with empty
+      if (fallbackFlattenedKeys.length === 0 && fs.existsSync(st)) {
+        try {
+          const existing = JSON.parse(fs.readFileSync(st, "utf-8"));
+          if (Array.isArray(existing) && existing.length > 0) {
+            console.log(`==> [Offline Seed] Preserving existing ${existing.length} keys in ${st}`);
+            continue;
+          }
+        } catch {}
+      }
+
       fs.writeFileSync(st, JSON.stringify(fallbackFlattenedKeys, null, 2), "utf-8");
       console.log(`==> [Offline Seed] Wrote ${fallbackFlattenedKeys.length} keys to ${st}`);
     } catch {

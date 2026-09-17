@@ -60,6 +60,11 @@ export function CoachDeskApp() {
           <p className="text-neutral-400 text-xs mt-1">
             Gabinete de decodificación ontológica, mapa de defensas y protocolo de facilitación 1:1.
           </p>
+          <div className="flex items-center gap-2 pt-2">
+            <a href="/fase0" className="text-[11px] text-amber-400 hover:underline">→ Ir a Fase 0 Dossier</a>
+            <span className="text-neutral-600">&bull;</span>
+            <a href="/desk/studio" className="text-[11px] text-cyan-400 hover:underline">→ Ir a Brand Identity Studio</a>
+          </div>
         </div>
 
         <div className="flex gap-1.5 bg-neutral-900 p-1 rounded-md border border-neutral-800">

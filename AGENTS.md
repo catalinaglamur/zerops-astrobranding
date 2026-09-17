@@ -77,8 +77,23 @@ zerops_workflow action="complete" step="provision" attestation="Servicios verifi
 
 ## 🏛️ Invariantes Técnicos del Monorepo
 
-- **Agnosticismo Total**: Prohibido hardcodear rutas absolutas de usuarios específicos (como `/var/www/baiosfera/`), correos de cuentas o claves fijas. Todo debe operar con variables de entorno o archivos pasados por parámetro.
-- **SSoT en `packages/contracts`**: Los tipos y validadores residen en Zod 4 dentro de `packages/contracts`. Ni el frontend ni el backend inventan esquemas duplicados.
+- **Agnosticismo Total**: Prohibido hardcodear rutas absolutas de usuarios específicos, correos de cuentas o claves fijas. Todo debe operar con variables de entorno o archivos pasados por parámetro.
+- **SSoT en `packages/contracts`**: Los tipos y validadores residen en Zod dentro de `packages/contracts`. Ni el frontend ni el backend inventan esquemas duplicados.
+- **Lakehouse Astrológico & Protección de Créditos (`packages/engine`)**: El motor de extracción universal (`executeUniversalExtraction`) implementa clientes tipados para los 15 shards astrológicos en `packages/engine/src/clients/`. Opera **por defecto con `dryRun: true`** usando fixtures canónicas deterministas para que los tests y desarrollos tengan **costo CERO** en créditos de APIs de pago.
+- **Brand Identity Preview Studio**: Disponible en `/desk/studio`, implementa canvas interactivo SVG de geometría sagrada, motor de contraste perceptual APCA ($L_c$) y exportación de tokens W3C DTCG (`$value`, `$type`).
+- **Gabinete Clínico & Fase 0**: Disponible en `/desk` y `/fase0`, conectando el blueprint ontológico del consultante/autor con los feeds Gold de la plataforma.
 - **Patrón Transactional Outbox**: Las operaciones críticas de negocio se registran en la tabla `task_outbox` de PostgreSQL 18 con UUIDv7 nativo antes de emitir eventos hacia NATS JetStream o BullMQ.
 - **Bifrost como Front Door de IA**: Todo el tráfico LLM pasa por `http://bifrost:8080/v1` con enrutamiento declarativo CEL y caché semántica en Valkey 7.2.
-- **Mismo Origen Web**: La landing comercial, el gabinete del consultante (`/app`), el panel del coach (`/desk`) y las rutas `/api` conviven bajo el mismo origen en el puerto 3000 de `apps/astrobranding`.
+- **Mismo Origen Web**: La landing comercial, el gabinete del consultante (`/app`), el panel del coach (`/desk`), el estudio visual (`/desk/studio`) y las rutas `/api` conviven bajo el mismo origen en el puerto 3000 de `apps/astrobranding`.
+
+---
+
+## 🧪 Comandos Deterministas de Verificación (Exit Code 0 Obligatorio)
+
+Antes de cualquier entrega o push a git, ejecutar en la raíz:
+```bash
+bun run check        # Verificación estricta de tipos TypeScript (tsc --noEmit)
+bun run check:arch   # Guardián estático de fronteras arquitectónicas (scripts/architecture-check.mjs)
+./setup.sh           # Pre-vuelo de entorno y validación de import.yaml con zcp-validate
+```
+

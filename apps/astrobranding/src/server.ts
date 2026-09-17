@@ -152,18 +152,32 @@ app.post("/api/astrology/chart", zValidator("json", NatalChartInputSchema), asyn
 // API: Universal 15-Shard Extraction (Lakehouse Tier 1 Bronze Dumps & Tier 2 Gold Feeds)
 app.post("/api/v1/extract", zValidator("json", UniversalBirthInputSchema), async (c) => {
   const input = c.req.valid("json");
+  const dryRunParam = c.req.query("dryRun");
+  // Default to dryRun: true to prevent accidental API credit burn
+  const dryRun = dryRunParam === "false" ? false : true;
+
   try {
-    const result = await executeUniversalExtraction(input);
+    const result = await executeUniversalExtraction(input, { dryRun });
     return c.json({
       success: true,
       dumpId: result.dumps.id,
       clientId: result.dumps.clientId,
       feedsGenerated: result.feedsCount,
+      dryRun,
     });
   } catch (err: unknown) {
     console.error("[API] Error in universal extraction:", err);
     return c.json({ success: false, error: err instanceof Error ? err.message : "Extraction error" }, 500);
   }
+});
+
+// API: Brand Identity Studio DTCG Tokens Schema
+app.get("/api/studio/ecosystems", (c) => {
+  return c.json([
+    { id: "obsidian_gold", name: "Obsidian & Celestial Gold", bg: "#09090b", accent: "#f59e0b" },
+    { id: "emerald_alchemical", name: "Alchemical Emerald & Silver", bg: "#022c22", accent: "#10b981" },
+    { id: "deep_void_cyan", name: "Deep Void & Ethereal Cyan", bg: "#030712", accent: "#06b6d4" },
+  ]);
 });
 
 // API: Query Gold Feeds for a Client

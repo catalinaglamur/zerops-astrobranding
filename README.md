@@ -95,16 +95,25 @@ bun run bootstrap
 1. **Zero Active Deployments in This Phase**: Per strict directive, this repository was prepared in a pure clean-room environment with 100% typing, zero compile errors, and verified contracts. No live cluster deployments were initiated.
 2. **To Deploy to Zerops**:
    - Push to `main` branch: GitHub Actions (`.github/workflows/deploy.yaml`) automatically triggers deployment using `zeropsio/actions@v1.0.2` with secret `ZEROPS_TOKEN`.
-   - Or import infrastructure via `zcli`:
-     ```bash
-     zcli project import import.yaml
+   - Or import infrastructure via native Zerops MCP:
+     ```json
+     zerops_workflow action="start" workflow="bootstrap" route="classic" intent="Aprovisionar monorepo astrobranding"
+     zerops_import filePath="import.yaml"
      ```
    - Build priority sequence in `import.yaml`:
      * Priority 10: PostgreSQL 18, Valkey 7.2, NATS 2.12, Local Storage, S3.
-     * Priority 8: FreeLLMAPI.
-     * Priority 6: Bifrost & EvolutionGo.
-     * Priority 4: Hermes-Agent.
-     * Priority 2: AstroBranding Fullstack Webapp.
+     * Priority 8: FreeLLMAPI (Node.js 24 + SQLite WAL).
+     * Priority 6: Bifrost (Go v2.0.0) & EvolutionGo (Go 1.22).
+     * Priority 4: Hermes-Agent (Python 3.12).
+     * Priority 2: AstroBranding Fullstack Webapp (Bun 1.3.9, :3000).
+
+---
+
+## 🎨 Visual Identity Preview Studio & Coach Fase 0
+
+- **Brand Identity Preview Studio (`/desk/studio`)**: Interactive SVG canvas for sacred geometry and monograms, APCA ($L_c$) lightness contrast calculator, dynamic typography fluid scaling (`clamp`), and W3C DTCG design tokens exporter (`$value`, `$type`).
+- **Fase 0 Dossier (`/fase0`)**: Master author coaching dossier linking Day Master, Human Design Blueprint, and Rav Berg Tikkun.
+- **Lakehouse Astrológico (`packages/engine`)**: 15 typed shard fetchers (`packages/engine/src/clients/`) with `dryRun: true` default to protect billable API quotas.
 
 ---
 

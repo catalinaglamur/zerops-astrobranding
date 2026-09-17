@@ -12,6 +12,28 @@ function estimateTokens(str: string): number {
 }
 
 /**
+ * FASE 0: Constitución Ontológica del Autor y Gabinete Clínico (feed_fase0_author_dossier.md)
+ */
+export function generateFeedFase0Author(dumps: ClientDumps): GeneratedFeed {
+  const meta = dumps.birthMetadata as Record<string, any>;
+  const trop = dumps.shardWesternTropical as Record<string, any>;
+  const bazi = dumps.shardBaziMetaphysics as Record<string, any>;
+  const kab = dumps.shardKabbalahGematria as Record<string, any>;
+  const hd = dumps.shardHumanDesign as Record<string, any>;
+
+  const xml = `<feed id="fase0_author" phase="0" domain="ontological_author_identity" client="${dumps.clientId}">
+  <author_blueprint>
+    <archetype_governor day_master="${bazi?.dayMaster || 'Geng'}" sun_tropical="${trop?.planets?.Sun?.sign || 'Capricorn'}"/>
+    <hd_blueprint type="${hd?.type || 'Manifesting Generator'}" authority="${hd?.authority || 'Emotional'}" profile="${hd?.profile || '3/5'}"/>
+    <karmic_tikkun mission="${kab?.tikkun?.rectorTheme || ''}" inertia="${kab?.tikkun?.coreCorrection || ''}"/>
+  </author_blueprint>
+  <clinical_coaching_desk status="ready" access_level="master_coach"/>
+</feed>`.trim();
+
+  return { feedType: "fase_0_author", xmlPayload: xml, tokenEstimate: estimateTokens(xml) };
+}
+
+/**
  * FASE 1: Numerología Pitagórica & Identidad de Marca (feed_fase1_num.md)
  */
 export function generateFeedFase1Num(dumps: ClientDumps): GeneratedFeed {
@@ -285,6 +307,8 @@ export function generateFeedDiagEGeo(dumps: ClientDumps): GeneratedFeed {
  */
 export function generateAllGoldFeeds(dumps: ClientDumps): GeneratedFeed[] {
   return [
+    // Fase 0: Autor & Coaching Desk
+    generateFeedFase0Author(dumps),
     // 9 Client Basic Report Phases
     generateFeedFase1Num(dumps),
     generateFeedFase2Occ(dumps),

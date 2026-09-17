@@ -242,3 +242,20 @@ export const ClientDumpsRecordSchema = z.object({
 });
 
 export type ClientDumpsRecord = z.infer<typeof ClientDumpsRecordSchema>;
+
+export type WesternTropicalShard = z.infer<typeof WesternTropicalShardSchema>;
+export type WesternSiderealShard = z.infer<typeof WesternSiderealShardSchema>;
+export type VedicJyotishShard = z.infer<typeof VedicJyotishShardSchema>;
+export type VedicDashasShard = z.infer<typeof VedicDashasShardSchema>;
+export type BaziMetaphysicsShard = z.infer<typeof BaziMetaphysicsShardSchema>;
+export type ZiweiFengshuiShard = z.infer<typeof ZiweiFengshuiShardSchema>;
+export type KabbalahGematriaShard = z.infer<typeof KabbalahGematriaShardSchema>;
+export type HebrewZmanimShard = z.infer<typeof HebrewZmanimShardSchema>;
+export type HumanDesignShard = z.infer<typeof HumanDesignShardSchema>;
+export type CosmobiologyMidpointsShard = z.infer<typeof CosmobiologyMidpointsShardSchema>;
+export type NasaEphemeridesShard = z.infer<typeof NasaEphemeridesShardSchema>;
+export type AstrocartographyAcgShard = z.infer<typeof AstrocartographyAcgShardSchema>;
+export type BusinessPentaOrgShard = z.infer<typeof BusinessPentaOrgShardSchema>;
+export type PartnerSynastryShard = z.infer<typeof PartnerSynastryShardSchema>;
+export type PredictiveElectionalShard = z.infer<typeof PredictiveElectionalShardSchema>;
+

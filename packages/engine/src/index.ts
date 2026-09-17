@@ -10,3 +10,4 @@ export * from "./mcp";
 export * from "./prompts/diagnostic-prompts";
 export * from "./payments";
 export * from "./frappe";
+export * from "./clients";
