@@ -1,4 +1,4 @@
-import { db, clientDumps, clientFeeds, type ClientDumps } from "@astrobranding/database";
+import { db, clientDumps, clientFeeds, eq, type ClientDumps } from "@astrobranding/database";
 import type { UniversalBirthInput } from "@astrobranding/contracts";
 import {
   fetchWesternTropical,
@@ -20,13 +20,16 @@ import {
 } from "./clients";
 import { generateAllGoldFeeds } from "./feeds";
 
-export interface ExtractionOptions extends ClientRequestOptions {}
+export interface ExtractionOptions extends ClientRequestOptions {
+  forceRefresh?: boolean;
+}
 
 /**
  * Universal 15-Shard Extraction Orchestrator
  * Fulfills omni_shards_master_manifest.md SSoT specifications
  * 
  * Safe by default: dryRun: true prevents any API credit consumption during dev/test.
+ * Idempotent by default: Checks PostgreSQL 18 before making ANY external API or MCP call.
  */
 export async function executeUniversalExtraction(
   input: UniversalBirthInput,
@@ -34,7 +37,31 @@ export async function executeUniversalExtraction(
 ): Promise<{
   dumps: ClientDumps;
   feedsCount: number;
+  cached?: boolean;
 }> {
+  // 1. Idempotency & Cache Guard: If client was already extracted, return existing dump immediately
+  if (!options.forceRefresh) {
+    const existingDumps = await db
+      .select()
+      .from(clientDumps)
+      .where(eq(clientDumps.clientId, input.clientId))
+      .limit(1);
+
+    if (existingDumps.length > 0) {
+      console.log(`[Cache Hit] Client ${input.clientId} already has completed extraction dump. Zero API credits consumed.`);
+      const existingFeeds = await db
+        .select()
+        .from(clientFeeds)
+        .where(eq(clientFeeds.clientId, input.clientId));
+
+      return {
+        dumps: existingDumps[0],
+        feedsCount: existingFeeds.length,
+        cached: true,
+      };
+    }
+  }
+
   // Parallel structured ingestion across all 15 shards with zero-cost dryRun safety
   const [
     shardWesternTropical,

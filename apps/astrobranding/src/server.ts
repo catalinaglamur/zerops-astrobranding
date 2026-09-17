@@ -153,16 +153,19 @@ app.post("/api/astrology/chart", zValidator("json", NatalChartInputSchema), asyn
 app.post("/api/v1/extract", zValidator("json", UniversalBirthInputSchema), async (c) => {
   const input = c.req.valid("json");
   const dryRunParam = c.req.query("dryRun");
+  const forceRefreshParam = c.req.query("forceRefresh");
   // Default to dryRun: true to prevent accidental API credit burn
   const dryRun = dryRunParam === "false" ? false : true;
+  const forceRefresh = forceRefreshParam === "true";
 
   try {
-    const result = await executeUniversalExtraction(input, { dryRun });
+    const result = await executeUniversalExtraction(input, { dryRun, forceRefresh });
     return c.json({
       success: true,
       dumpId: result.dumps.id,
       clientId: result.dumps.clientId,
       feedsGenerated: result.feedsCount,
+      cached: result.cached ?? false,
       dryRun,
     });
   } catch (err: unknown) {
