@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { getDashboardHtml } from "./dashboard.js";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -12,6 +13,7 @@ const DB_PATH = process.env.FREEAPI_DB_PATH || path.join(process.cwd(), "data", 
 const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(DB_PATH), "data");
 const ENCRYPTION_KEY_RAW = process.env.ENCRYPTION_KEY || "freellmapi-sovereign-master-secret-key-32b";
 const ENCRYPTION_KEY = crypto.createHash("sha256").update(ENCRYPTION_KEY_RAW).digest(); // Exactly 32 bytes
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "glamur2026";
 
 // Ensure volume mount directory exists
 const dbDir = path.dirname(DB_PATH);
@@ -271,21 +273,75 @@ function autoDiscoverEnv() {
 
 autoDiscoverEnv();
 
-// Health Check Probes
-app.get(["/", "/api/ping"], (req, res) => {
+// Auth verification helper
+function checkAdminAuth(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    if (authHeader.slice(7) === ADMIN_PASSWORD) return true;
+  }
+  if (req.query && req.query.token === ADMIN_PASSWORD) return true;
+  if (req.headers["x-admin-token"] === ADMIN_PASSWORD) return true;
+  return false;
+}
+
+// Auth Login API
+app.post("/api/auth/login", (req, res) => {
+  const { password } = req.body || {};
+  if (password === ADMIN_PASSWORD) {
+    return res.json({ ok: true, token: ADMIN_PASSWORD });
+  }
+  return res.status(401).json({ ok: false, error: "Contraseña incorrecta" });
+});
+
+// Reset Cooldowns API
+app.post("/api/reset-cooldown", (req, res) => {
+  if (!checkAdminAuth(req)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const { provider, keyId } = req.body || {};
+  if (keyId) {
+    db.prepare("UPDATE provider_keys SET cooldown_until = 0, rate_limit_429_count = 0 WHERE id = ?").run(keyId);
+  } else if (provider) {
+    db.prepare("UPDATE provider_keys SET cooldown_until = 0, rate_limit_429_count = 0 WHERE provider = ?").run(provider);
+  } else {
+    db.prepare("UPDATE provider_keys SET cooldown_until = 0, rate_limit_429_count = 0").run();
+  }
+  res.json({ success: true, message: "Cooldowns restablecidos correctamente" });
+});
+
+// Dedicated Web Dashboard Route
+app.get("/dashboard", (req, res) => {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.send(getDashboardHtml({ version: "2.5.0", dbPath: DB_PATH }));
+});
+
+// Root & Health Check Probes
+app.get(["/", "/api/ping", "/health"], (req, res) => {
+  // If browser navigates to root, serve sovereign web dashboard
+  const isHtml = req.path === "/" && (req.headers.accept?.includes("text/html") || req.query.view === "ui");
+  if (isHtml) {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.send(getDashboardHtml({ version: "2.5.0", dbPath: DB_PATH }));
+  }
+
+  // Otherwise serve canonical JSON status probe
   const totalKeys = db.prepare("SELECT COUNT(*) as count FROM provider_keys").get().count;
   res.json({
     status: "ok",
     service: "freellmapi",
-    version: "2.4.0",
+    version: "2.5.0",
     engine: "node:sqlite",
     totalKeysInPool: totalKeys,
+    dashboardUrl: "/dashboard",
     timestamp: new Date().toISOString(),
   });
 });
 
 // Admin Status Endpoint: Shows active pools, remaining cooldowns, quotas
 app.get("/api/status", (req, res) => {
+  if (!checkAdminAuth(req)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   const now = Date.now();
   const rows = db.prepare("SELECT * FROM provider_keys").all();
 
@@ -296,6 +352,7 @@ app.get("/api/status", (req, res) => {
     pools[r.provider].totalKeys++;
     if (!inCooldown) pools[r.provider].activeKeys++;
     pools[r.provider].keys.push({
+      id: r.id,
       account: r.account_label,
       inCooldown,
       cooldownSecondsRemaining: Math.max(0, Math.ceil((r.cooldown_until - now) / 1000)),
@@ -310,6 +367,9 @@ app.get("/api/status", (req, res) => {
 
 // Admin Seed Endpoint: Ingest multiple markdown files or JSON payloads
 app.post("/admin/seed", (req, res) => {
+  if (!checkAdminAuth(req)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   const { markdown, files, label = "seeded" } = req.body;
   let totalIngested = 0;
 
