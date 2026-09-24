@@ -108,8 +108,9 @@ zerops:
         PORT: 3001
         HOST: "0.0.0.0"
         NODE_ENV: "production"
-        CACHE_ENABLED: "true"
-        CACHE_TTL_SECONDS: "86400"
+        RESPONSE_CACHE: "true"
+        RESPONSE_CACHE_PERSIST: "true"
+        RESPONSE_CACHE_TTL_SECONDS: "86400"
         FREEAPI_DB_PATH: "/mnt/localstorage/freellmapi/freellmapi.db"
         FREEAPI_CONFIG_PATH: "/var/www/apps/freellmapi/config.json"
         ENCRYPTION_KEY: "c8e2b109e4d56f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a"
