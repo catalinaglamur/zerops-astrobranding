@@ -76,8 +76,7 @@ zerops:
       base: ubuntu/nodejs@24
       buildCommands:
         - cd apps/freellmapi && npm install
-      deployFiles:
-        - apps/freellmapi
+      deployFiles: .
       cache:
         - ~/.npm
     run:
