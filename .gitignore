@@ -9,6 +9,7 @@ dist/
 *.log
 .engram
 apps/freellmapi/data/
+apps/freellmapi/config.json
 *.db
 # Local AI runtime state
 .atl/
