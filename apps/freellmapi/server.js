@@ -9,6 +9,7 @@ app.use(express.json({ limit: "10mb" }));
 
 const PORT = Number(process.env.PORT || 3001);
 const DB_PATH = process.env.FREEAPI_DB_PATH || path.join(process.cwd(), "data", "freellmapi.db");
+const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(DB_PATH), "data");
 const ENCRYPTION_KEY_RAW = process.env.ENCRYPTION_KEY || "freellmapi-sovereign-master-secret-key-32b";
 const ENCRYPTION_KEY = crypto.createHash("sha256").update(ENCRYPTION_KEY_RAW).digest(); // Exactly 32 bytes
 
@@ -221,6 +222,7 @@ function autoDiscoverEnv() {
   // Auto-ingest seed.json if present
   const seedFiles = [
     path.join(DATA_DIR, "seed.json"),
+    path.join(process.cwd(), "apps", "freellmapi", "data", "seed.json"),
     "/mnt/localstorage/freellmapi/seed.json",
     path.join(process.cwd(), "data", "seed.json"),
   ];
