@@ -55,8 +55,7 @@ zerops:
         - curl -fsSL -o /usr/local/bin/bifrost https://github.com/maximhq/bifrost/releases/download/v2.0.0/bifrost-linux-amd64
         - chmod +x /usr/local/bin/bifrost
         - mkdir -p /app/data
-      start:
-        exec: /usr/local/bin/bifrost -app-dir /app/data -port 8080 -host 0.0.0.0 -log-level info -log-style json
+      start: /usr/local/bin/bifrost -app-dir /app/data -port 8080 -host 0.0.0.0 -log-level info -log-style json
       healthCheck:
         httpGet:
           port: 8080
