@@ -272,8 +272,8 @@ function autoDiscoverEnv() {
 
 autoDiscoverEnv();
 
-// Health Check Probe
-app.get("/api/ping", (req, res) => {
+// Health Check Probes
+app.get(["/", "/api/ping"], (req, res) => {
   const totalKeys = db.prepare("SELECT COUNT(*) as count FROM provider_keys").get().count;
   res.json({
     status: "ok",
