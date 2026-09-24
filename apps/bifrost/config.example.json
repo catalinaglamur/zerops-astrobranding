@@ -43,6 +43,11 @@
           "name": "deepseek-pro-commercial",
           "value": "env.DEEPSEEK_API_KEY",
           "models": ["*"],
+          "aliases": {
+            "deepseek-chat": "deepseek-v4-pro",
+            "deepseek-coder": "deepseek-v4-pro",
+            "deepseek-reasoner": "deepseek-v4-pro"
+          },
           "weight": 1.0
         }
       ],
@@ -75,12 +80,27 @@
             "provider": "deepseek",
             "allowed_models": ["*"],
             "key_ids": ["*"],
-            "weight": 0.0
+            "weight": 1.0
           }
         ]
       }
     ],
     "routing_rules": [
+      {
+        "id": "rule-coding-and-reasoning-to-deepseek",
+        "name": "Route Coding and Deep Reasoning Directly to DeepSeek",
+        "cel_expression": "model.contains('deepseek') || model.contains('code') || model.contains('reason') || headers['x-tier'] == 'production'",
+        "targets": [
+          {
+            "provider": "deepseek",
+            "weight": 1.0
+          }
+        ],
+        "fallbacks": [
+          "freellmapi"
+        ],
+        "priority": 0
+      },
       {
         "id": "rule-freellm-zero-cost-priority",
         "name": "Prioritize FreeLLMAPI with Paid Commercial Failover",
@@ -93,7 +113,8 @@
         ],
         "fallbacks": [
           "deepseek"
-        ]
+        ],
+        "priority": 1
       }
     ]
   }
