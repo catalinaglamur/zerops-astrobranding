@@ -57,16 +57,21 @@ zerops:
         - bifrost
     run:
       base: alpine/go@1.22
+      volume:
+        hostname: localstorage
+        mountPath: /mnt/localstorage
+        readOnly: false
       ports:
         - port: 8080
           httpSupport: true
       prepareCommands:
         - sudo apk add --no-cache ca-certificates tzdata
-        - sudo mkdir -p /app/data && sudo chown -R zerops:zerops /app/data
+        - sudo mkdir -p /mnt/localstorage/bifrost/chromem
+        - sudo chown -R zerops:zerops /mnt/localstorage/bifrost
       initCommands:
-        - cp /var/www/data/config.json /app/data/config.json
+        - test -f /mnt/localstorage/bifrost/config.json || cp /var/www/data/config.json /mnt/localstorage/bifrost/config.json
         - chmod +x /var/www/bifrost
-      start: /var/www/bifrost -app-dir /app/data -port 8080 -host 0.0.0.0 -log-level info -log-style json
+      start: /var/www/bifrost -app-dir /mnt/localstorage/bifrost -port 8080 -host 0.0.0.0 -log-level info -log-style json
       healthCheck:
         httpGet:
           port: 8080
@@ -74,7 +79,7 @@ zerops:
       envVariables:
         APP_PORT: "8080"
         APP_HOST: "0.0.0.0"
-        APP_DIR: "/app/data"
+        APP_DIR: "/mnt/localstorage/bifrost"
         GOMEMLIMIT: "900MiB"
         GOGC: "200"
         VALKEY_ADDR: "valkey:6379"
@@ -103,6 +108,8 @@ zerops:
         PORT: 3001
         HOST: "0.0.0.0"
         NODE_ENV: "production"
+        CACHE_ENABLED: "true"
+        CACHE_TTL_SECONDS: "86400"
         FREEAPI_DB_PATH: "/mnt/localstorage/freellmapi/freellmapi.db"
         FREEAPI_CONFIG_PATH: "/var/www/apps/freellmapi/config.json"
         ENCRYPTION_KEY: "c8e2b109e4d56f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a"
