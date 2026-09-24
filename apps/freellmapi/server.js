@@ -72,8 +72,8 @@ const PROVIDER_METADATA = {
   groq: {
     name: "Groq Cloud (Fast LPU)",
     baseUrl: "https://api.groq.com/openai/v1",
-    defaultModel: "llama-3.3-70b-versatile",
-    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    defaultModel: "qwen/qwen3.8-27b",
+    models: ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     tier: "fast",
   },
   opencode: {
@@ -86,11 +86,10 @@ const PROVIDER_METADATA = {
   openrouter: {
     name: "OpenRouter Free Pool",
     baseUrl: "https://openrouter.ai/api/v1",
-    defaultModel: "meta-llama/llama-3.2-3b-instruct:free",
+    defaultModel: "qwen/qwen3.8-27b:free",
     models: [
-      "meta-llama/llama-3.2-3b-instruct:free",
-      "google/gemini-2.0-flash-exp:free",
-      "deepseek/deepseek-chat:free",
+      "qwen/qwen3.8-27b:free",
+      "nex-agi/nex-n2.5-mini:free",
     ],
     tier: "smart",
   },
