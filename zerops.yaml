@@ -43,19 +43,30 @@ zerops:
           port: 3000
           path: /health
 
-  # 2. Maxim AI Bifrost Enterprise AI Gateway (Go v2.0.0)
+  # 2. Maxim AI Bifrost Enterprise AI Gateway (Go v2.2.3)
   - setup: bifrost
+    build:
+      base: alpine/go@1.22
+      buildCommands:
+        - curl -fsSL -o bifrost https://downloads.getmaxim.ai/bifrost/v2.2.3/linux/amd64/bifrost-http
+        - chmod +x bifrost
+        - mkdir -p data
+        - cp apps/bifrost/config.json data/config.json
+      deployFiles: .
+      cache:
+        - bifrost
     run:
-      base: alpine@3.21
+      base: alpine/go@1.22
       ports:
         - port: 8080
           httpSupport: true
       prepareCommands:
-        - apk add --no-cache curl ca-certificates tzdata
-        - curl -fsSL -o /usr/local/bin/bifrost https://github.com/maximhq/bifrost/releases/download/v2.0.0/bifrost-linux-amd64
-        - chmod +x /usr/local/bin/bifrost
-        - mkdir -p /app/data
-      start: /usr/local/bin/bifrost -app-dir /app/data -port 8080 -host 0.0.0.0 -log-level info -log-style json
+        - sudo apk add --no-cache ca-certificates tzdata
+        - sudo mkdir -p /app/data && sudo chown -R zerops:zerops /app/data
+      initCommands:
+        - cp /var/www/data/config.json /app/data/config.json
+        - chmod +x /var/www/bifrost
+      start: /var/www/bifrost -app-dir /app/data -port 8080 -host 0.0.0.0 -log-level info -log-style json
       healthCheck:
         httpGet:
           port: 8080
