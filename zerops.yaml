@@ -74,8 +74,7 @@ zerops:
   # 3. FreeLLMAPI Multi-Provider Free Inference Proxy (Node.js 24)
   - setup: freellmapi
     build:
-      base: nodejs@24
-      os: ubuntu
+      base: ubuntu/nodejs@24
       buildCommands:
         - cd apps/freellmapi && npm install
       deployFiles:
@@ -83,8 +82,7 @@ zerops:
       cache:
         - ~/.npm
     run:
-      base: nodejs@24
-      os: ubuntu
+      base: ubuntu/nodejs@24
       volume:
         hostname: localstorage
         mountPath: /mnt/localstorage
