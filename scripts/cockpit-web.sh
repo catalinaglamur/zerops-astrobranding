@@ -28,7 +28,7 @@ case "$cmd" in
             exit 0
         fi
         echo "🚀 Iniciando Cockpit Web GUI en puerto $PORT..."
-        nohup bun "$SCRIPT" > /tmp/cockpit-web.log 2>&1 &
+        setsid nohup bun "$SCRIPT" </dev/null > /tmp/cockpit-web.log 2>&1 &
         sleep 1
         if is_running; then
             echo "✅ Cockpit Web GUI iniciado exitosamente:"

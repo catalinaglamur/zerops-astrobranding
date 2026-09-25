@@ -111,41 +111,19 @@ async function collectBifrost(): Promise<BifrostTelemetry> {
 
     if (resp.ok) {
       result.status = "ONLINE";
-      const text = await resp.text();
-      for (const line of text.split("\n")) {
-        if (line.startsWith("#")) continue;
-        if (line.startsWith("bifrost_input_tokens_total")) {
-          const val = parseFloat(line.split(" ").pop() || "0");
-          result.inputTokens += isNaN(val) ? 0 : val;
-        } else if (line.startsWith("bifrost_output_tokens_total")) {
-          const val = parseFloat(line.split(" ").pop() || "0");
-          result.outputTokens += isNaN(val) ? 0 : val;
-        } else if (line.startsWith("bifrost_requests_total")) {
-          const val = parseFloat(line.split(" ").pop() || "0");
-          result.requestsTotal += isNaN(val) ? 0 : val;
-        } else if (line.startsWith("bifrost_cache_hits_total")) {
-          const val = parseFloat(line.split(" ").pop() || "0");
-          if (line.includes('type="semantic"')) result.semanticCacheHits += isNaN(val) ? 0 : val;
-          else result.directCacheHits += isNaN(val) ? 0 : val;
-        }
-      }
-      result.totalTokens = result.inputTokens + result.outputTokens;
-      if (result.requestsTotal > 0) {
-        const totalHits = result.semanticCacheHits + result.directCacheHits;
-        result.cacheHitRatioPercent = Math.min(100, (totalHits / result.requestsTotal) * 100);
-      }
     }
   } catch {
     result.status = "OFFLINE";
   }
 
-  // Virtual Keys & Spend aggregation from Bifrost SQLite logs.db
+  // Authoritative metrics aggregation from Bifrost SQLite logs.db (Single SSH roundtrip)
   try {
-    const sql = `SELECT COALESCE(virtual_key_name, 'Default'), COUNT(*), COALESCE(SUM(total_tokens), 0), COALESCE(SUM(cost), 0) FROM logs GROUP BY virtual_key_name;`;
-    const rawOut = execSync(`ssh -o ConnectTimeout=2 bifrost "sqlite3 /app/data/logs.db \\"${sql}\\"" 2>/dev/null`, {
-      encoding: "utf-8",
-      timeout: 2500,
-    }).trim();
+    const summarySql = `SELECT 'SUMMARY|' || COUNT(*) || '|' || COALESCE(SUM(total_tokens), 0) || '|' || COALESCE(SUM(prompt_tokens), 0) || '|' || COALESCE(SUM(completion_tokens), 0) || '|' || COALESCE(SUM(cost), 0) || '|' || COALESCE(SUM(CASE WHEN cache_debug LIKE '%cache_hit%:true%' THEN 1 ELSE 0 END), 0) FROM logs;`;
+    const keysSql = `SELECT 'KEY|' || COALESCE(virtual_key_name, 'Default') || '|' || COUNT(*) || '|' || COALESCE(SUM(total_tokens), 0) || '|' || COALESCE(SUM(cost), 0) FROM logs GROUP BY virtual_key_name;`;
+    const rawOut = execSync(
+      `ssh -o ConnectTimeout=1 -o BatchMode=yes bifrost "sqlite3 /app/data/logs.db \\"${summarySql} ${keysSql}\\"" 2>/dev/null`,
+      { encoding: "utf-8", timeout: 2000 }
+    ).trim();
 
     const budgetMap: Record<string, { budget: number; rpm: number }> = {
       "Production Sovereign Key": { budget: 50.0, rpm: 120 },
@@ -156,29 +134,40 @@ async function collectBifrost(): Promise<BifrostTelemetry> {
       Default: { budget: 25.0, rpm: 100 },
     };
 
-    let totalSpend = 0;
     if (rawOut) {
-      for (const row of rawOut.split("\n")) {
-        const [name, reqs, tokens, cost] = row.split("|");
-        const keyName = name.trim();
-        const costNum = parseFloat(cost) || 0;
-        totalSpend += costNum;
-        const cfg = budgetMap[keyName] || { budget: 10.0, rpm: 60 };
-        const status = costNum >= cfg.budget ? "EXCEEDED" : costNum >= cfg.budget * 0.8 ? "WARNING" : "OK";
+      for (const line of rawOut.split("\n")) {
+        const parts = line.split("|");
+        if (parts[0] === "SUMMARY" && parts.length >= 7) {
+          result.requestsTotal = parseInt(parts[1], 10) || 0;
+          result.totalTokens = parseInt(parts[2], 10) || 0;
+          result.inputTokens = parseInt(parts[3], 10) || 0;
+          result.outputTokens = parseInt(parts[4], 10) || 0;
+          result.totalCostUsd = parseFloat(parts[5]) || 0;
+          result.semanticCacheHits = parseInt(parts[6], 10) || 0;
+          if (result.requestsTotal > 0) {
+            result.cacheHitRatioPercent = Math.min(100, (result.semanticCacheHits / result.requestsTotal) * 100);
+          }
+        } else if (parts[0] === "KEY" && parts.length >= 5) {
+          const keyName = parts[1].trim();
+          const reqs = parseInt(parts[2], 10) || 0;
+          const tokens = parseInt(parts[3], 10) || 0;
+          const costNum = parseFloat(parts[4]) || 0;
+          const cfg = budgetMap[keyName] || { budget: 10.0, rpm: 60 };
+          const status = costNum >= cfg.budget ? "EXCEEDED" : costNum >= cfg.budget * 0.8 ? "WARNING" : "OK";
 
-        result.virtualKeys.push({
-          id: keyName.toLowerCase().replace(/[^a-z0-9]/g, "-"),
-          name: keyName,
-          requests: parseInt(reqs, 10) || 0,
-          tokens: parseInt(tokens, 10) || 0,
-          costUsd: costNum,
-          budgetLimitMonthly: cfg.budget,
-          rateLimitRpm: cfg.rpm,
-          status,
-        });
+          result.virtualKeys.push({
+            id: keyName.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+            name: keyName,
+            requests: reqs,
+            tokens,
+            costUsd: costNum,
+            budgetLimitMonthly: cfg.budget,
+            rateLimitRpm: cfg.rpm,
+            status,
+          });
+        }
       }
     }
-    result.totalCostUsd = totalSpend;
   } catch {
     // If SSH or SQLite not queryable, provide default key topology
     result.virtualKeys = [
