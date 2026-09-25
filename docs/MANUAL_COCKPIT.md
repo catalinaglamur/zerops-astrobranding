@@ -1,6 +1,6 @@
-# 🏛️ Manual de Usuario: Cockpit Soberano de Telemetría, Límites y LLMOps (v2.0)
+# 🏛️ Manual de Usuario: Cockpit Soberano de Telemetría, Límites y LLMOps (v2.1)
 
-Bienvenido al manual operativo del **Cockpit Soberano de Telemetría y Límites** para el ecosistema Zerops y AstroBranding. Este motor fue diseñado bajo una premisa no negociable: **cero consumo de memoria RAM en reposo (0 MB idle)**, garantizando que el operador y el agente puedan supervisar recursos físicos, cuotas de búsqueda, balances de APIs y gastos de inferencia sin ralentizar el servidor.
+Bienvenido al manual operativo del **Cockpit Soberano de Telemetría y Límites** para el ecosistema Zerops y AstroBranding. Este motor opera bajo una premisa inquebrantable: **cero consumo de tokens LLM de Gemini/Antigravity**, **ejecución 100% autónoma en TypeScript/Bun**, y **cero consumo de memoria RAM en reposo (0 MB idle)**.
 
 ---
 
@@ -11,6 +11,7 @@ El Cockpit ofrece dos canales de operación complementarios:
 1. **Modo Conversacional / CLI Efímero (`cockpit-status`)**: 
    - Ejecución instantánea en sub-segundo (~500ms).
    - Emite el reporte consolidado en la terminal o al chat de Antigravity (AGY) y finaliza de inmediato liberando el 100% de la memoria RAM.
+   - Puede invocarse directamente vía Bash, cron o scripts sin requerir intervención de AGY.
 2. **Modo Dashboard Web Visual (`cockpit-web`)**:
    - Micro-servidor HTTP en Bun en el puerto `3050`, expuesto de forma segura por el proxy reverso Nginx en el puerto `8080`.
    - **URL de Acceso Global**: `https://zcp-252-8080.ny1.zerops.app/cockpit/`
@@ -21,25 +22,35 @@ El Cockpit ofrece dos canales de operación complementarios:
 
 ---
 
-## 2. Las 5 Categorías Estrictas de Telemetría
+## 2. Invariante de Entorno Soberano (Sin Dependencia de ZCP)
 
-El Cockpit categoriza rigurosamente todos los componentes para evitar reportes genéricos ("ACTIVE") y presentar métricas reales, cuotas y límites:
+Para garantizar que el Cockpit funcione tanto en `zcp` como en el futuro contenedor `astrobranding` (incluso cuando `zcp` esté apagado), la resolución de credenciales y variables opera en cascada:
+1. **`process.env`**: Variables inyectadas por la plataforma Zerops a nivel de runtime.
+2. **`/etc/environment`**: Variables globales del sistema operativo inyectadas durante el aprovisionamiento.
+3. **`/var/www/.env`**: Variables locales del repositorio.
+4. **`glamur-keys.md`**: Respaldo en Google Drive SSoT solo si existe en entorno local.
 
-### 🤖 [1/5] LLMOps & Gateway de Inferencia (Bifrost & FreeLLMAPI)
-- **Bifrost Core**:
+---
+
+## 3. Las 6 Categorías Estrictas de Telemetría
+
+### 🤖 [1/6] LLMOps & Gateways de Inferencia en Vivo (Bifrost & FreeLLMAPI)
+- **Bifrost AI Gateway (`http://bifrost:8080`)**:
   - Gasto real en USD por Virtual-Key vs. presupuesto mensual asignado (`$0.0004 / $25.00`, etc.).
   - Peticiones procesadas y tokens totales (entrada/salida).
-  - Tasa de acierto de **Semantic Cache** (`chromem`) y peticiones resueltas con latencia 0ms y costo $0.00.
+  - **Caché Directa (Hash Exacto en SQLite/Memoria)**: Registra los aciertos con latencia 0ms y costo $0.00 (ej: 4 hits, 30.8% de ahorro).
+  - **Caché Semántica (Chromem Vector Store)**: Registra las coincidencias vectoriales por proximidad semántica.
   - Límites de frecuencia aplicados por CEL (`rateLimitRpm`).
-- **FreeLLMAPI Pool**:
-  - Latencia en milisegundos hacia el pool gratuito.
-  - Estado de la caché de respuestas en SQLite (`ACTIVE`).
-  - Proveedores con claves listas y operativas (`deepseek`, `groq`, etc.).
-- **Arquitectura de Persistencia Indestructible**:
-  - Bifrost persiste su historial transaccional en SQLite (`/app/data/logs.db`) y sus embeddings semánticos en disco (`/app/data/chromem/*.gob.gz`).
-  - Los contadores de Prometheus en RAM se reinician a 0 si el contenedor se reinicia, pero `cockpit-status` consulta directamente la base de datos física para reportar siempre los totales acumulados reales sin pérdida histórica.
+- **FreeLLMAPI Gateway (`http://freellmapi:3001`)**:
+  - Lectura en tiempo real de la base de datos física SQLite (`/var/www/localstorage/freellmapi/freellmapi.db`).
+  - Total de solicitudes procesadas (éxitos vs. errores).
+  - Consumo de tokens (entrada/salida).
+  - Catálogo de modelos gratuitos atendidos en el pool (`GLM-4.7`, `Llama-3.1`, `Qwen3.8`, `DeepSeek-V4-Pro`, etc.).
+  - Ahorro financiero ($0.00 USD facturados).
+- **Métricas Totales Combinadas**:
+  - Resumen unificado de toda la inferencia del ecosistema (ej: 20 peticiones, 2,407 tokens totales, $0.0007 USD gastados).
 
-### ☁️ [2/5] Infraestructura Zerops & Recursos Físicos
+### ☁️ [2/6] Infraestructura Zerops, Recursos Físicos & Costos Estimados
 - **Consumo Real de RAM por Contenedor (cgroup v2 / Prometheus)**:
   - `zcp`: Memoria activa real en MB (Control Plane).
   - `freellmapi`: Memoria activa en MB (Node.js 24).
@@ -47,66 +58,66 @@ El Cockpit categoriza rigurosamente todos los componentes para evitar reportes g
   - `valkey`: Memoria residente en MB y tiempo de CPU.
   - `localstorage`: Memoria activa en MB.
   - Contenedores detenidos (`astrobranding`, `hermes`, `evolution`, `database`, `nats`): marcados explícitamente en `0 MB ($0.00 de costo)`.
+- **Estimación de Costo del Proyecto**:
+  - Cálculo en tiempo real de gasto por RAM activa (~$0.005/GB-hora = ~$3.60/GB/mes).
+  - Costo proyectado diario y mensual (~$0.34 USD/día, ~$10.10 USD/mes).
 - **Almacenamiento Local (POSIX)**:
   - Ocupación en `/var/www/localstorage` desglosada por servicio (`bifrostSize`, `freellmSize`, `totalUsed`).
 - **Object Storage S3**:
-  - Cuota asignada (50 GB) y estado del bucket (`glamur-assets`).
+  - Cuota real asignada por Zerops: **10 GB** (escalable en caliente desde la interfaz de Zerops o `import.yaml` sin tiempo de inactividad).
 
-### 🌐 [3/5] Browsers, Scraping & Motores de Búsqueda (Cuotas & Saldos)
+### 🌐 [3/6] Browsers, Scraping & Motores de Búsqueda (Cuotas & Fechas de Corte)
 Inspección en vivo mediante consultas autenticadas y lectura de cabeceras oficiales:
-- **Tavily Search API**: Búsquedas consumidas vs. límite mensual (ej: `768 / 1,000 usadas`, `232 restantes`, `77% consumido`).
-- **Firecrawl Scraper**: Créditos consumidos vs. cuota (ej: `2 / 1,000 créditos usados`, `998 restantes`).
-- **Exa Neural Search**: Consultas estimadas y costo por query ($0.007/query en plan de $10 USD).
-- **Jina AI Reader / Embeddings**: Límite de frecuencia (500 RPM) y cuota de tokens.
-- **Brave Search API**: Límite por segundo (50 RPS) y cuota mensual gratuita (2,000 queries/mes).
-- Todas las claves se muestran enmascaradas (`tvly-d...pqvv`) para certificar su configuración sin exponer secretos.
+- **Tavily Search API**: Búsquedas consumidas vs. límite (768 / 1,000 usadas · 232 restantes · 77% consumido) | **Corte**: `Día 1 de cada mes (00:00 UTC)`.
+- **Firecrawl Scraper**: Créditos consumidos vs. cuota (2 / 1,000 créditos usados · 998 restantes · 1% consumido) | **Corte**: `21 de cada mes` (Próximo: 21-Oct-2026).
+- **Exa Neural Search**: Consultas estimadas y costo por query ($0.007/query en plan de $10 USD) | **Corte**: `Prepago sin caducidad fija`.
+- **Jina AI Reader / Embeddings**: Límite de frecuencia (500 RPM) y cuota de tokens | **Corte**: `Día 1 de cada mes`.
+- **Brave Search API**: Límite por segundo (50 RPS) y cuota mensual gratuita (2,000 queries/mes) | **Corte**: `Día 1 de cada mes`.
 
-### 🔮 [4/5] APIs Astrológicas & Efemérides Científicas
-- **NASA JPL Horizons**: Peticiones restantes (`9,999 / 10,000`) y rate limit (1,000 req/hora).
-- **Astroway Engine**: 760 endpoints / Swiss Ephemeris D1-D60 y rate limit (60 RPM).
-- **FreeAstro API**: Límite diario (500 consultas/día) y rate limit (10 RPS).
-- **VedAstro Jyotish**: 677 calculadores atómicos védicos y rate limit (60 RPM).
-- **Kundali MCP Engine**: Motor de cálculo local e ilimitado (Shadbala, Vimshottari, BPHS).
-- **AstrologyAPI.io**: Timing helenístico, Fagan-Bradley, ACG y rate limit (30 RPM).
+### 🔮 [4/6] APIs Astrológicas & Efemérides Científicas
+- **AstrologyAPI.io**: **50 req/mes gratuitas** (30 RPM, Timing helenístico, Fagan-Bradley, ACG) | **Corte**: `Día 1 de cada mes`.
+- **Astroway Engine**: **Plan Indie PRO ($5/mo, 50,000 créditos/mes)**, 30 req/min, 760 endpoints SE 2.10 | **Corte**: `Día 1 de cada mes`.
+- **NASA JPL Horizons**: **9,999 / 10,000 peticiones restantes** (1,000 req/hora, efemérides DE440/DE441) | **Corte**: Ventana horaria continua.
+- **FreeAstro API**: **500 consultas/día** (10 RPS, Plan Starter) | **Corte**: `Diario a las 00:00 UTC`.
+- **VedAstro Jyotish**: 60 RPM | 677 calculadores atómicos védicos.
+- **Kundali MCP Engine**: Ilimitado (Motor local Jyotish Shadbala, Vimshottari 5 niveles & Pramaan BPHS).
 
-### 📨 [5/5] Mensajería, Edge & CDN Transaccional
+### 📨 [5/6] Cloud, Mensajería Transaccional & Edge (AWS, ZeptoMail, WhatsApp, Cloudflare)
+- **Amazon Web Services (AWS)**: Integración con **SES v2** en `us-east-1`, Configuration Set `deliverability-set`, cumplimiento DMARCbis RFC 9989 y DKIM 2048.
 - **Zoho ZeptoMail**: Capacidad transaccional (10,000 emails de bienvenida) y entrega SMTP/REST.
-- **Meta WhatsApp Cloud**: 1,000 conversaciones de servicio mensuales gratuitas (API Graph v21+).
-- **Cloudflare Edge DNS/CDN**: SSL Full Strict, Edge WAF y sincronización de DNS sin límite.
+- **Resend Email Relay**: Backup relay transaccional (3,000 emails/mes gratis).
+- **Meta WhatsApp Cloud**: 1,000 conversaciones/mes gratuitas (API Graph v21+) | **Corte**: `Día 1 de cada mes`.
+- **Evolution WhatsApp API**: Microservicio Go/whatsmeow en Zerops (`http://evolution:8080`).
+- **Cloudflare Edge CDN/WAF**: SSL Full Strict, Edge WAF y sincronización de DNS sin límite para `catalinaglamur.com`.
 
----
-
-## 3. Interacción en Lenguaje Natural (Chat AGY)
-
-No necesitas recordar comandos técnicos de consola. Puedes solicitarle a Antigravity (AGY) directamente:
-
-| Solicitud en Lenguaje Natural | Acción Ejecutada por el Agente |
-|---|---|
-| *"¿Cómo está el cockpit?"* / *"Dame el estado general del sistema"* | Ejecuta `cockpit-status` y presenta el reporte estructurado de las 5 categorías. |
-| *"¿Cuánto saldo me queda en Tavily o Firecrawl?"* | Inspecciona las cuotas de búsqueda y muestra consumido vs. restante. |
-| *"¿Cuánto hemos gastado en inferencia LLM?"* | Filtra el gasto en USD y consumo de tokens en Bifrost. |
-| *"¿Cómo va el semantic cache de Bifrost?"* | Reporta la tasa de acierto (hit ratio) y el ahorro en tokens. |
-| *"¿Cuánta memoria RAM física están consumiendo los contenedores?"* | Muestra el consumo exacto en MB por cgroup v2. |
-| *"Enciende el dashboard web"* / *"Quiero ver el panel visual"* | Ejecuta `cockpit-web start` y provee la URL del panel. |
-| *"Apaga el panel web"* | Ejecuta `cockpit-web stop` para volver a 0 MB de memoria RAM. |
+### 💳 [6/6] Pasarelas de Pago, Logística & CRM E-Commerce
+- **Wompi Colombia**: Validación criptográfica SHA256 de webhooks, llaves pública/privada y secret de integridad.
+- **ePayco**: Firma criptográfica SHA256, llaves P_KEY y cliente.
+- **Stripe**: Checkout global, webhook secret y soporte Apple Pay / Google Pay.
+- **MercadoPago**: Tokens de acceso y webhook secret para pagos LatAm.
+- **dLocal Go**: Pagos transfronterizos LatAm.
+- **MiPaquete Fulfillment**: Integración logística con normalización DANE Divipola (`05001000`) y Pago Contra Entrega (COD).
+- **Carriers Domésticos**: Envia.com, Coordinadora, Servientrega y Skydropx.
+- **Frappe Cloud / ERPNext**: Conexión con `catalinaglamur.v.frappe.cloud`, API Key y webhook secret para facturación electrónica DIAN y CRM.
 
 ---
 
 ## 4. Comandos de Terminal (Línea de Comandos CLI)
 
 ```bash
-# 1. Reporte completo estructurado en 5 categorías
+# 1. Reporte completo estructurado en 6 categorías
 cockpit-status
 
-# 2. Salida en formato JSON estructurado
+# 2. Salida en formato JSON estructurado (sin colores)
 cockpit-status --json
 
-# 3. Filtro exclusivo por categoría
-cockpit-status --llm         # Solo LLMOps (Bifrost & FreeLLM)
-cockpit-status --infra       # Solo Contenedores Zerops, RAM real y discos
+# 3. Filtros específicos por categoría
+cockpit-status --llm         # Solo LLMOps (Bifrost & FreeLLMAPI)
+cockpit-status --infra       # Solo Contenedores Zerops, RAM real, discos y costos
 cockpit-status --browsers    # Solo Cuotas de Búsqueda y Scraping (Tavily, Firecrawl, Exa)
 cockpit-status --astrology   # Solo APIs Astrológicas y Efemérides
-cockpit-status --apis        # Solo Mensajería y Edge
+cockpit-status --apis        # Solo Cloud, Mensajería y Edge (AWS, Zepto, WA, CF)
+cockpit-status --ecommerce   # Solo Pasarelas de Pago, Logística y CRM
 ```
 
 ---

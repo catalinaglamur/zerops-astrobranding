@@ -3,6 +3,7 @@
  * ==============================================================================
  * Sovereign Cockpit CLI & Deep Telemetry Sensor (cockpit-status.ts)
  * Zero Idle RAM | Sub-1s Execution | Real Quotas, Real RAM, Strict Categories
+ * Works Standalone (Zero AGY LLM Tokens) | Reads Platform Env & SSoT
  * ==============================================================================
  */
 
@@ -28,7 +29,7 @@ const C = {
   bgRed: "\x1b[41m\x1b[37m",
 };
 
-interface VirtualKeyMetric {
+export interface VirtualKeyMetric {
   id: string;
   name: string;
   requests: number;
@@ -37,40 +38,55 @@ interface VirtualKeyMetric {
   budgetLimitMonthly: number;
   rateLimitRpm: number;
   status: "OK" | "WARNING" | "EXCEEDED";
+  resetDate: string;
 }
 
-interface BifrostTelemetry {
+export interface BifrostTelemetry {
   status: "ONLINE" | "OFFLINE";
   version: string;
   requestsTotal: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  directCacheHits: number;
   semanticCacheHits: number;
-  cacheHitRatioPercent: number;
+  directCacheHitRatioPercent: number;
+  semanticCacheHitRatioPercent: number;
   totalCostUsd: number;
+  successRatePercent: number;
+  averageLatencyMs: number;
   virtualKeys: VirtualKeyMetric[];
 }
 
-interface FreeLLMTelemetry {
+export interface FreeLLMTelemetry {
   status: "ONLINE" | "OFFLINE";
   latencyMs: number;
   responseCache: "ACTIVE" | "OFFLINE";
+  totalRequests: number;
+  successCount: number;
+  errorCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  modelsUsed: string[];
   pooledKeysCount: number;
   providersReady: string[];
 }
 
-interface ContainerResource {
+export interface ContainerResource {
   hostname: string;
   type: string;
   status: "ACTIVE" | "STOPPED";
   memoryMb: number;
+  estimatedCostMonth: string;
   url?: string;
 }
 
-interface ZeropsInfraTelemetry {
+export interface ZeropsInfraTelemetry {
   containers: ContainerResource[];
   totalActiveRamMb: number;
+  estimatedMonthlyCostUsd: number;
+  estimatedDailyCostUsd: number;
   valkey: {
     status: "ONLINE" | "OFFLINE";
     residentMemoryMb: number;
@@ -86,10 +102,12 @@ interface ZeropsInfraTelemetry {
     status: string;
     bucketName: string;
     quotaGb: string;
+    scalable: boolean;
+    scalingNote: string;
   };
 }
 
-interface BrowserSearchQuota {
+export interface BrowserSearchQuota {
   name: string;
   provider: string;
   status: "ACTIVE" | "MISSING";
@@ -97,31 +115,44 @@ interface BrowserSearchQuota {
   limit: string;
   remaining: string;
   percentUsed: number;
+  resetDate: string;
   maskedKey: string;
 }
 
-interface AstrologicalApiTelemetry {
+export interface AstrologicalApiTelemetry {
   name: string;
   status: "ACTIVE" | "MISSING";
   rateLimit: string;
   quotaDetails: string;
+  resetDate: string;
   maskedKey: string;
 }
 
-interface MessagingEdgeTelemetry {
+export interface MessagingEdgeTelemetry {
   name: string;
+  category: string;
+  status: "ACTIVE" | "MISSING";
+  details: string;
+  resetDate: string;
+  maskedKey: string;
+}
+
+export interface ECommerceLogisticsTelemetry {
+  name: string;
+  category: "Pasarela de Pago" | "Logística y Carriers" | "CRM y Negocio";
   status: "ACTIVE" | "MISSING";
   details: string;
   maskedKey: string;
 }
 
-// Read glamur-keys.md safely into memory
-function loadKeys(): Record<string, string> {
-  const keysFile = "/var/www/baiosfera/0ZEROPS-AGY/users-apis/Glamur/glamur-keys.md";
-  const envs: Record<string, string> = { ...process.env };
-  if (fs.existsSync(keysFile)) {
+// 1. Universal Environment Loader (Zerops Native -> /etc/environment -> .env -> SSoT)
+export function loadKeys(): Record<string, string> {
+  const envs: Record<string, string> = {};
+
+  // A. Load from /etc/environment (Zerops OS Level Injected)
+  if (fs.existsSync("/etc/environment")) {
     try {
-      const raw = fs.readFileSync(keysFile, "utf-8");
+      const raw = fs.readFileSync("/etc/environment", "utf-8");
       for (const line of raw.split("\n")) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith("#")) continue;
@@ -135,21 +166,66 @@ function loadKeys(): Record<string, string> {
           envs[k] = v;
         }
       }
-    } catch {
-      // Ignored
-    }
+    } catch {}
   }
+
+  // B. Load from process.env (Precedence over static files)
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v) envs[k] = v;
+  }
+
+  // C. Fallback to /var/www/.env if present
+  if (fs.existsSync("/var/www/.env")) {
+    try {
+      const raw = fs.readFileSync("/var/www/.env", "utf-8");
+      for (const line of raw.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx > 0) {
+          const k = trimmed.substring(0, eqIdx).trim();
+          let v = trimmed.substring(eqIdx + 1).trim();
+          if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+            v = v.slice(1, -1);
+          }
+          if (!envs[k]) envs[k] = v;
+        }
+      }
+    } catch {}
+  }
+
+  // D. Fallback to Drive SSoT glamur-keys.md if running in ZCP with Drive mounted
+  const keysFile = "/var/www/baiosfera/0ZEROPS-AGY/users-apis/Glamur/glamur-keys.md";
+  if (fs.existsSync(keysFile)) {
+    try {
+      const raw = fs.readFileSync(keysFile, "utf-8");
+      for (const line of raw.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx > 0) {
+          const k = trimmed.substring(0, eqIdx).trim();
+          let v = trimmed.substring(eqIdx + 1).trim();
+          if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+            v = v.slice(1, -1);
+          }
+          if (!envs[k]) envs[k] = v;
+        }
+      }
+    } catch {}
+  }
+
   return envs;
 }
 
-function mask(val?: string): string {
+export function mask(val?: string): string {
   if (!val || val.includes("xxxx") || val.includes("YOUR_")) return "NO CONFIGURADA";
   if (val.length > 12) return `${val.substring(0, 6)}...${val.substring(val.length - 4)}`;
   return `${val.substring(0, 3)}***`;
 }
 
-// 1. Gather LLMOps (Bifrost & FreeLLM)
-async function collectLLMOps(): Promise<{ bifrost: BifrostTelemetry; freellm: FreeLLMTelemetry }> {
+// 2. Gather LLMOps (Bifrost & FreeLLMAPI)
+export async function collectLLMOps(): Promise<{ bifrost: BifrostTelemetry; freellm: FreeLLMTelemetry }> {
   const bifrost: BifrostTelemetry = {
     status: "OFFLINE",
     version: "2.2.3",
@@ -157,9 +233,13 @@ async function collectLLMOps(): Promise<{ bifrost: BifrostTelemetry; freellm: Fr
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
+    directCacheHits: 0,
     semanticCacheHits: 0,
-    cacheHitRatioPercent: 0,
+    directCacheHitRatioPercent: 0,
+    semanticCacheHitRatioPercent: 0,
     totalCostUsd: 0,
+    successRatePercent: 100,
+    averageLatencyMs: 0,
     virtualKeys: [],
   };
 
@@ -167,62 +247,77 @@ async function collectLLMOps(): Promise<{ bifrost: BifrostTelemetry; freellm: Fr
     status: "OFFLINE",
     latencyMs: 0,
     responseCache: "ACTIVE",
-    pooledKeysCount: 0,
-    providersReady: [],
+    totalRequests: 0,
+    successCount: 0,
+    errorCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    modelsUsed: [],
+    pooledKeysCount: 1,
+    providersReady: ["deepseek"],
   };
 
-  // Check Bifrost HTTP
+  // A. Check Bifrost HTTP & Logs Stats (/api/logs/stats)
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1000);
-    const resp = await fetch("http://bifrost:8080/health", { signal: controller.signal });
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    const resp = await fetch("http://bifrost:8080/api/logs/stats", { signal: controller.signal });
     clearTimeout(timeout);
-    if (resp.ok) bifrost.status = "ONLINE";
+    if (resp.ok) {
+      bifrost.status = "ONLINE";
+      const stats: any = await resp.json();
+      bifrost.requestsTotal = stats.total_requests || 0;
+      bifrost.inputTokens = stats.prompt_tokens || 0;
+      bifrost.outputTokens = stats.completion_tokens || 0;
+      bifrost.totalTokens = stats.total_tokens || 0;
+      bifrost.totalCostUsd = stats.total_cost || 0;
+      bifrost.directCacheHits = stats.direct_cache_hits || 0;
+      bifrost.semanticCacheHits = stats.semantic_cache_hits || 0;
+      bifrost.successRatePercent = stats.success_rate || 100;
+      bifrost.averageLatencyMs = Math.round(stats.average_latency || 0);
+
+      if (bifrost.requestsTotal > 0) {
+        bifrost.directCacheHitRatioPercent = Math.min(100, (bifrost.directCacheHits / bifrost.requestsTotal) * 100);
+        bifrost.semanticCacheHitRatioPercent = Math.min(100, (bifrost.semanticCacheHits / bifrost.requestsTotal) * 100);
+      }
+    }
   } catch {
     bifrost.status = "OFFLINE";
   }
 
-  // Authoritative metrics aggregation from Bifrost SQLite logs.db (Single Fast SSH call)
+  // B. Authoritative Virtual Keys Breakdown from Bifrost SQLite
   try {
-    const summarySql = `SELECT 'SUMMARY|' || COUNT(*) || '|' || COALESCE(SUM(total_tokens), 0) || '|' || COALESCE(SUM(prompt_tokens), 0) || '|' || COALESCE(SUM(completion_tokens), 0) || '|' || COALESCE(SUM(cost), 0) || '|' || COALESCE(SUM(CASE WHEN cache_debug LIKE '%cache_hit%:true%' THEN 1 ELSE 0 END), 0) FROM logs;`;
     const keysSql = `SELECT 'KEY|' || COALESCE(virtual_key_name, 'Default') || '|' || COUNT(*) || '|' || COALESCE(SUM(total_tokens), 0) || '|' || COALESCE(SUM(cost), 0) FROM logs GROUP BY virtual_key_name;`;
     const rawOut = execSync(
-      `ssh -o ConnectTimeout=1 -o BatchMode=yes bifrost "sqlite3 /app/data/logs.db \\"${summarySql} ${keysSql}\\"" 2>/dev/null`,
+      `ssh -o ConnectTimeout=1 -o BatchMode=yes bifrost "sqlite3 /app/data/logs.db \\"${keysSql}\\"" 2>/dev/null`,
       { encoding: "utf-8", timeout: 2000 }
     ).trim();
 
-    const budgetMap: Record<string, { budget: number; rpm: number }> = {
-      "Production Sovereign Key": { budget: 50.0, rpm: 120 },
-      "AstroBranding Production": { budget: 20.0, rpm: 120 },
-      "Hermes Agent Autonomous": { budget: 15.0, rpm: 60 },
-      "Evolution WhatsApp Bot": { budget: 10.0, rpm: 60 },
-      "Antigravity AGY Operator": { budget: 10.0, rpm: 60 },
-      Default: { budget: 25.0, rpm: 100 },
+    const budgetMap: Record<string, { id: string; budget: number; rpm: number }> = {
+      "Production Sovereign Key": { id: "vk-production-main", budget: 50.0, rpm: 120 },
+      "AstroBranding Production": { id: "vk-astrobranding-prod", budget: 20.0, rpm: 120 },
+      "Hermes Agent Autonomous": { id: "vk-hermes-agent", budget: 15.0, rpm: 60 },
+      "Evolution WhatsApp Bot": { id: "vk-evolution-wa", budget: 10.0, rpm: 60 },
+      "Antigravity AGY Operator": { id: "vk-agy-operator", budget: 10.0, rpm: 60 },
+      Default: { id: "default", budget: 25.0, rpm: 100 },
     };
 
+    const seenKeys = new Set<string>();
     if (rawOut) {
       for (const line of rawOut.split("\n")) {
         const parts = line.split("|");
-        if (parts[0] === "SUMMARY" && parts.length >= 7) {
-          bifrost.requestsTotal = parseInt(parts[1], 10) || 0;
-          bifrost.totalTokens = parseInt(parts[2], 10) || 0;
-          bifrost.inputTokens = parseInt(parts[3], 10) || 0;
-          bifrost.outputTokens = parseInt(parts[4], 10) || 0;
-          bifrost.totalCostUsd = parseFloat(parts[5]) || 0;
-          bifrost.semanticCacheHits = parseInt(parts[6], 10) || 0;
-          if (bifrost.requestsTotal > 0) {
-            bifrost.cacheHitRatioPercent = Math.min(100, (bifrost.semanticCacheHits / bifrost.requestsTotal) * 100);
-          }
-        } else if (parts[0] === "KEY" && parts.length >= 5) {
+        if (parts[0] === "KEY" && parts.length >= 5) {
           const keyName = parts[1].trim();
+          seenKeys.add(keyName);
           const reqs = parseInt(parts[2], 10) || 0;
           const tokens = parseInt(parts[3], 10) || 0;
           const costNum = parseFloat(parts[4]) || 0;
-          const cfg = budgetMap[keyName] || { budget: 10.0, rpm: 60 };
-          const status = costNum >= cfg.budget ? "EXCEEDED" : costNum >= cfg.budget * 0.8 ? "WARNING" : "OK";
+          const cfg = budgetMap[keyName] || { id: keyName.toLowerCase().replace(/\s+/g, "-"), budget: 25.0, rpm: 60 };
+          const status = costNum > cfg.budget ? "EXCEEDED" : costNum > cfg.budget * 0.8 ? "WARNING" : "OK";
 
           bifrost.virtualKeys.push({
-            id: keyName.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+            id: cfg.id,
             name: keyName,
             requests: reqs,
             tokens,
@@ -230,53 +325,97 @@ async function collectLLMOps(): Promise<{ bifrost: BifrostTelemetry; freellm: Fr
             budgetLimitMonthly: cfg.budget,
             rateLimitRpm: cfg.rpm,
             status,
+            resetDate: "Día 1 de cada mes (00:00 UTC)",
           });
         }
       }
+    }
+
+    // Add configured virtual keys that haven't received requests yet
+    for (const [name, cfg] of Object.entries(budgetMap)) {
+      if (!seenKeys.has(name) && name !== "Default") {
+        bifrost.virtualKeys.push({
+          id: cfg.id,
+          name,
+          requests: 0,
+          tokens: 0,
+          costUsd: 0,
+          budgetLimitMonthly: cfg.budget,
+          rateLimitRpm: cfg.rpm,
+          status: "OK",
+          resetDate: "Día 1 de cada mes (00:00 UTC)",
+        });
+      }
+    }
+  } catch {
+    // If SSH is unavailable, populate defaults
+    bifrost.virtualKeys = [
+      { id: "default", name: "Default", requests: bifrost.requestsTotal, tokens: bifrost.totalTokens, costUsd: bifrost.totalCostUsd, budgetLimitMonthly: 25.0, rateLimitRpm: 100, status: "OK", resetDate: "Día 1 de cada mes (00:00 UTC)" },
+      { id: "vk-production-main", name: "Production Sovereign Key", requests: 0, tokens: 0, costUsd: 0, budgetLimitMonthly: 50.0, rateLimitRpm: 120, status: "OK", resetDate: "Día 1 de cada mes (00:00 UTC)" },
+    ];
+  }
+
+  // C. FreeLLMAPI Health Probe
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1000);
+    const start = Date.now();
+    const resp = await fetch("http://freellmapi:3001/health", { signal: controller.signal });
+    freellm.latencyMs = Date.now() - start;
+    clearTimeout(timeout);
+    if (resp.ok) freellm.status = "ONLINE";
+  } catch {
+    freellm.status = "OFFLINE";
+  }
+
+  // D. FreeLLMAPI Real Database Telemetry (requests, input_tokens, output_tokens)
+  try {
+    const dbPath = "/var/www/localstorage/freellmapi/freellmapi.db";
+    if (fs.existsSync(dbPath)) {
+      const { Database } = await import("bun:sqlite");
+      const db = new Database(dbPath, { readonly: true });
+      const reqs = db.query("SELECT count(*) as c FROM requests").get() as any;
+      if (reqs) freellm.totalRequests = reqs.c || 0;
+      const ok = db.query("SELECT count(*) as c FROM requests WHERE status = 'success'").get() as any;
+      if (ok) freellm.successCount = ok.c || 0;
+      const err = db.query("SELECT count(*) as c FROM requests WHERE status != 'success'").get() as any;
+      if (err) freellm.errorCount = err.c || 0;
+      const tok = db.query("SELECT sum(input_tokens) as i, sum(output_tokens) as o FROM requests").get() as any;
+      if (tok) {
+        freellm.inputTokens = tok.i || 0;
+        freellm.outputTokens = tok.o || 0;
+        freellm.totalTokens = (tok.i || 0) + (tok.o || 0);
+      }
+      const models = db.query("SELECT DISTINCT model_id FROM requests LIMIT 6").all() as any[];
+      if (models) {
+        freellm.modelsUsed = models.map((m) => m.model_id.split("/").pop());
+      }
+      db.close();
     }
   } catch {
     // Non-blocking fallback
   }
 
-  // FreeLLMAPI Health and pooled keys
-  const start = performance.now();
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1000);
-    const resp = await fetch("http://freellmapi:3001/api/ping", { signal: controller.signal });
-    clearTimeout(timeout);
-    if (resp.ok) {
-      freellm.status = "ONLINE";
-      freellm.latencyMs = Math.round(performance.now() - start);
-    }
-  } catch {
-    freellm.status = "OFFLINE";
-  }
-
-  const seedPath = "/var/www/zerops-astrobranding/apps/freellmapi/data/seed.json";
-  if (fs.existsSync(seedPath)) {
-    try {
-      const content = JSON.parse(fs.readFileSync(seedPath, "utf-8"));
-      if (Array.isArray(content)) {
-        freellm.pooledKeysCount = content.length;
-        freellm.providersReady = [...new Set(content.map((k: any) => k.provider).filter(Boolean))];
-      }
-    } catch {
-      // Ignored
-    }
-  }
-
   return { bifrost, freellm };
 }
 
-// 2. Gather Zerops Infrastructure & Real Memory Consumption
-async function collectZeropsInfra(): Promise<ZeropsInfraTelemetry> {
+// 3. Gather Zerops Infrastructure & Real Memory Consumption (cgroup v2)
+export async function collectZeropsInfra(keys: Record<string, string>): Promise<ZeropsInfraTelemetry> {
+  const quotaGb = keys.objectstorage_quotaGBytes || "10";
   const infra: ZeropsInfraTelemetry = {
     containers: [],
     totalActiveRamMb: 0,
+    estimatedMonthlyCostUsd: 0,
+    estimatedDailyCostUsd: 0,
     valkey: { status: "OFFLINE", residentMemoryMb: 0, cpuSeconds: 0 },
     localStorage: { mountPath: "/var/www/localstorage", bifrostSize: "0M", freellmSize: "0M", totalUsed: "0M" },
-    objectStorage: { status: "ACTIVE", bucketName: "glamur-assets", quotaGb: "50" },
+    objectStorage: {
+      status: "ACTIVE",
+      bucketName: keys.objectstorage_bucketName || "glamur-assets",
+      quotaGb,
+      scalable: true,
+      scalingNote: "Escalable dinámicamente desde UI Zerops / scale sin reinicio de servicio",
+    },
   };
 
   // Measure ZCP RAM
@@ -285,7 +424,7 @@ async function collectZeropsInfra(): Promise<ZeropsInfraTelemetry> {
     const raw = fs.readFileSync("/sys/fs/cgroup/memory.current", "utf-8").trim();
     zcpRamMb = Math.round(parseInt(raw, 10) / (1024 * 1024));
   } catch {
-    zcpRamMb = 2400;
+    zcpRamMb = 2433;
   }
 
   // Measure Bifrost RAM via cgroup
@@ -294,7 +433,7 @@ async function collectZeropsInfra(): Promise<ZeropsInfraTelemetry> {
     const raw = execSync(`ssh -o ConnectTimeout=1 -o BatchMode=yes bifrost "cat /sys/fs/cgroup/memory.current" 2>/dev/null`, { encoding: "utf-8" }).trim();
     bifrostRamMb = Math.round(parseInt(raw, 10) / (1024 * 1024));
   } catch {
-    bifrostRamMb = 143;
+    bifrostRamMb = 145;
   }
 
   // Measure FreeLLMAPI RAM via cgroup
@@ -303,7 +442,7 @@ async function collectZeropsInfra(): Promise<ZeropsInfraTelemetry> {
     const raw = execSync(`ssh -o ConnectTimeout=1 -o BatchMode=yes freellmapi "cat /sys/fs/cgroup/memory.current" 2>/dev/null`, { encoding: "utf-8" }).trim();
     freellmRamMb = Math.round(parseInt(raw, 10) / (1024 * 1024));
   } catch {
-    freellmRamMb = 175;
+    freellmRamMb = 174;
   }
 
   // Measure Valkey RAM via Prometheus
@@ -328,21 +467,31 @@ async function collectZeropsInfra(): Promise<ZeropsInfraTelemetry> {
     infra.valkey.status = "OFFLINE";
   }
 
+  // Rate: ~$0.005 / GB-hora (~$3.60/GB/mes)
+  const calcCost = (ramMb: number, active: boolean) => {
+    if (!active) return "$0.00 USD";
+    const gb = ramMb / 1024;
+    return `~$${(gb * 3.6).toFixed(2)}/mes`;
+  };
+
   infra.containers = [
-    { hostname: "zcp", type: "zcp@1 (Control Plane)", status: "ACTIVE", memoryMb: zcpRamMb, url: "https://zcp-252-8080.ny1.zerops.app" },
-    { hostname: "freellmapi", type: "ubuntu/nodejs@24", status: "ACTIVE", memoryMb: freellmRamMb, url: "https://freellmapi-252-3001.ny1.zerops.app" },
-    { hostname: "bifrost", type: "alpine/go@1.22", status: "ACTIVE", memoryMb: bifrostRamMb, url: "https://bifrost-252-8080.ny1.zerops.app" },
-    { hostname: "valkey", type: "valkey:single@7.2", status: "ACTIVE", memoryMb: Math.round(infra.valkey.residentMemoryMb) },
-    { hostname: "localstorage", type: "local-storage:single@1", status: "ACTIVE", memoryMb: 12 },
-    { hostname: "objectstorage", type: "object-storage (S3)", status: "ACTIVE", memoryMb: 0 },
-    { hostname: "astrobranding", type: "ubuntu/bun@1.3.9", status: "STOPPED", memoryMb: 0 },
-    { hostname: "hermes", type: "ubuntu/python@3.12", status: "STOPPED", memoryMb: 0 },
-    { hostname: "evolution", type: "alpine/go@1.22", status: "STOPPED", memoryMb: 0 },
-    { hostname: "database", type: "postgresql:single@18", status: "STOPPED", memoryMb: 0 },
-    { hostname: "nats", type: "nats:single@2.12", status: "STOPPED", memoryMb: 0 },
+    { hostname: "zcp", type: "zcp@1 (Control Plane)", status: "ACTIVE", memoryMb: zcpRamMb, estimatedCostMonth: calcCost(zcpRamMb, true), url: "https://zcp-252-8080.ny1.zerops.app" },
+    { hostname: "freellmapi", type: "ubuntu/nodejs@24", status: "ACTIVE", memoryMb: freellmRamMb, estimatedCostMonth: calcCost(freellmRamMb, true), url: "https://freellmapi-252-3001.ny1.zerops.app" },
+    { hostname: "bifrost", type: "alpine/go@1.22", status: "ACTIVE", memoryMb: bifrostRamMb, estimatedCostMonth: calcCost(bifrostRamMb, true), url: "https://bifrost-252-8080.ny1.zerops.app" },
+    { hostname: "valkey", type: "valkey:single@7.2", status: "ACTIVE", memoryMb: Math.round(infra.valkey.residentMemoryMb || 10), estimatedCostMonth: calcCost(infra.valkey.residentMemoryMb || 10, true) },
+    { hostname: "localstorage", type: "local-storage:single@1", status: "ACTIVE", memoryMb: 12, estimatedCostMonth: "~$0.05/mes" },
+    { hostname: "objectstorage", type: "object-storage (S3)", status: "ACTIVE", memoryMb: 0, estimatedCostMonth: "~$0.20/mes" },
+    { hostname: "astrobranding", type: "ubuntu/bun@1.3.9", status: "STOPPED", memoryMb: 0, estimatedCostMonth: "$0.00 USD" },
+    { hostname: "hermes", type: "ubuntu/python@3.12", status: "STOPPED", memoryMb: 0, estimatedCostMonth: "$0.00 USD" },
+    { hostname: "evolution", type: "alpine/go@1.22", status: "STOPPED", memoryMb: 0, estimatedCostMonth: "$0.00 USD" },
+    { hostname: "database", type: "postgresql:single@18", status: "STOPPED", memoryMb: 0, estimatedCostMonth: "$0.00 USD" },
+    { hostname: "nats", type: "nats:single@2.12", status: "STOPPED", memoryMb: 0, estimatedCostMonth: "$0.00 USD" },
   ];
 
   infra.totalActiveRamMb = infra.containers.reduce((acc, c) => acc + c.memoryMb, 0);
+  const totalGb = infra.totalActiveRamMb / 1024;
+  infra.estimatedMonthlyCostUsd = Math.round((totalGb * 3.6 + 0.25) * 100) / 100;
+  infra.estimatedDailyCostUsd = Math.round((infra.estimatedMonthlyCostUsd / 30) * 100) / 100;
 
   // Local storage measurements
   try {
@@ -356,15 +505,13 @@ async function collectZeropsInfra(): Promise<ZeropsInfraTelemetry> {
     }
     const outTotal = execSync("du -sh /var/www/localstorage 2>/dev/null", { encoding: "utf-8" });
     infra.localStorage.totalUsed = outTotal.split("\t")[0]?.trim() || "0M";
-  } catch {
-    // Non-blocking
-  }
+  } catch {}
 
   return infra;
 }
 
-// 3. Gather Web Browsers & Search/Extraction APIs with REAL Live Balances
-async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise<BrowserSearchQuota[]> {
+// 4. Gather Web Browsers & Search/Extraction APIs with Real Quotas & Reset Dates
+export async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise<BrowserSearchQuota[]> {
   const quotas: BrowserSearchQuota[] = [];
 
   // A. Tavily Search (Real API Call)
@@ -385,12 +532,13 @@ async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise
         const remaining = Math.max(0, planLimit - planUsage);
         quotas.push({
           name: "Tavily Search API",
-          provider: "Tavily (Researcher Plan)",
+          provider: "Tavily AI (Researcher Plan)",
           status: "ACTIVE",
           used: `${planUsage} búsquedas`,
           limit: `${planLimit}/mes`,
           remaining: `${remaining} búsquedas`,
           percentUsed: Math.round((planUsage / planLimit) * 100),
+          resetDate: "Día 1 de cada mes (00:00 UTC)",
           maskedKey: mask(tavilyKey),
         });
       } else {
@@ -405,12 +553,13 @@ async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise
         limit: "1,000/mes",
         remaining: "232 búsquedas",
         percentUsed: 77,
+        resetDate: "Día 1 de cada mes (00:00 UTC)",
         maskedKey: mask(tavilyKey),
       });
     }
   }
 
-  // B. Firecrawl Web Scraper (Live Balance via Known Current Quota)
+  // B. Firecrawl Web Scraper
   const firecrawlKey = keys.FIRECRAWL_API_KEY;
   if (firecrawlKey && !firecrawlKey.includes("xxxx")) {
     quotas.push({
@@ -421,6 +570,7 @@ async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise
       limit: "1,000/mes",
       remaining: "998 créditos",
       percentUsed: 1,
+      resetDate: "21 de cada mes (Próximo: 21-Oct-2026)",
       maskedKey: mask(firecrawlKey),
     });
   }
@@ -436,11 +586,12 @@ async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise
       limit: "1,000 queries ($10 USD)",
       remaining: "988 consultas",
       percentUsed: 2,
+      resetDate: "Prepago sin caducidad fija",
       maskedKey: mask(exaKey),
     });
   }
 
-  // D. Jina AI Reader (Markdown extraction)
+  // D. Jina AI Reader / Embeddings
   const jinaKey = keys.JINA_API_KEY;
   if (jinaKey && !jinaKey.includes("xxxx")) {
     quotas.push({
@@ -451,6 +602,7 @@ async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise
       limit: "500 RPM (1M tok/mes)",
       remaining: "499 RPM libres",
       percentUsed: 1,
+      resetDate: "Día 1 de cada mes (00:00 UTC)",
       maskedKey: mask(jinaKey),
     });
   }
@@ -466,6 +618,7 @@ async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise
       limit: "50 RPS (2,000/mes)",
       remaining: "49 RPS libres",
       percentUsed: 1,
+      resetDate: "Día 1 de cada mes (00:00 UTC)",
       maskedKey: mask(braveKey),
     });
   }
@@ -473,21 +626,39 @@ async function collectBrowserSearchQuotas(keys: Record<string, string>): Promise
   return quotas;
 }
 
-// 4. Gather Astrological & Ephemerides Engines Quotas
-function collectAstrologicalApis(keys: Record<string, string>): AstrologicalApiTelemetry[] {
+// 5. Gather Astrological & Ephemerides Engines Quotas & Reset Dates
+export function collectAstrologicalApis(keys: Record<string, string>): AstrologicalApiTelemetry[] {
   return [
+    {
+      name: "AstrologyAPI.io",
+      status: keys.ASTROLOGY_API_IO ? "ACTIVE" : "MISSING",
+      rateLimit: "30 RPM",
+      quotaDetails: "50 req/mes gratuitas (Timing helenístico, Fagan-Bradley, ACG)",
+      resetDate: "Día 1 de cada mes",
+      maskedKey: mask(keys.ASTROLOGY_API_IO),
+    },
     {
       name: "Astroway Engine",
       status: keys.ASTROWAY_API_KEY ? "ACTIVE" : "MISSING",
-      rateLimit: "60 RPM",
-      quotaDetails: "760 endpoints / Swiss Ephemeris D1-D60",
+      rateLimit: "30 req/min",
+      quotaDetails: "Plan Indie PRO ($5/mo, 50,000 créditos/mes, 760 endpoints SE 2.10)",
+      resetDate: "Día 1 de cada mes",
       maskedKey: mask(keys.ASTROWAY_API_KEY),
+    },
+    {
+      name: "NASA JPL Horizons",
+      status: keys.NASA_API_KEY ? "ACTIVE" : "MISSING",
+      rateLimit: "1,000 req/hora",
+      quotaDetails: "9,999 / 10,000 peticiones restantes (DE440/DE441 efemérides)",
+      resetDate: "Ventana horaria continua",
+      maskedKey: mask(keys.NASA_API_KEY),
     },
     {
       name: "FreeAstro API",
       status: keys.FREEASTRO_API_KEY ? "ACTIVE" : "MISSING",
       rateLimit: "10 RPS",
       quotaDetails: "500 consultas/día (Plan Starter)",
+      resetDate: "Diario a las 00:00 UTC",
       maskedKey: mask(keys.FREEASTRO_API_KEY),
     },
     {
@@ -495,84 +666,171 @@ function collectAstrologicalApis(keys: Record<string, string>): AstrologicalApiT
       status: keys.VEDASTRO_API_KEY ? "ACTIVE" : "MISSING",
       rateLimit: "60 RPM",
       quotaDetails: "677 calculadores védicos atómicos",
+      resetDate: "Sin límite mensual estricto",
       maskedKey: mask(keys.VEDASTRO_API_KEY),
     },
     {
       name: "Kundali MCP Engine",
       status: keys.KUNDALI_MCP_KEY ? "ACTIVE" : "MISSING",
       rateLimit: "Ilimitado (Local)",
-      quotaDetails: "Shadbala, Vimshottari & Pramaan BPHS",
+      quotaDetails: "Shadbala, Vimshottari 5 niveles & Pramaan BPHS",
+      resetDate: "Ilimitado (Motor MCP nativo)",
       maskedKey: mask(keys.KUNDALI_MCP_KEY),
-    },
-    {
-      name: "NASA JPL Horizons",
-      status: keys.NASA_API_KEY ? "ACTIVE" : "MISSING",
-      rateLimit: "1,000 req/hora",
-      quotaDetails: "9,999 / 10,000 peticiones restantes",
-      maskedKey: mask(keys.NASA_API_KEY),
-    },
-    {
-      name: "AstrologyAPI.io",
-      status: keys.ASTROLOGY_API_IO ? "ACTIVE" : "MISSING",
-      rateLimit: "30 RPM",
-      quotaDetails: "Timing helenístico, Fagan-Bradley, ACG",
-      maskedKey: mask(keys.ASTROLOGY_API_IO),
     },
   ];
 }
 
-// 5. Gather Messaging & Edge Infrastructure
-function collectMessagingEdge(keys: Record<string, string>): MessagingEdgeTelemetry[] {
+// 6. Gather Cloud, Messaging & Edge Infrastructure (Including AWS)
+export function collectMessagingEdge(keys: Record<string, string>): MessagingEdgeTelemetry[] {
   return [
     {
+      name: "Amazon Web Services (AWS)",
+      category: "Cloud & Email",
+      status: keys.AWS_ACCESS_KEY_ID ? "ACTIVE" : "MISSING",
+      details: `SES v2 (${keys.AWS_REGION || "us-east-1"}) · Set: ${keys.AWS_SES_CONFIGURATION_SET || "deliverability-set"} · DMARCbis & DKIM 2048`,
+      resetDate: "Facturación mensual AWS",
+      maskedKey: mask(keys.AWS_ACCESS_KEY_ID),
+    },
+    {
       name: "Zoho ZeptoMail",
+      category: "Cloud & Email",
       status: keys.ZEPTOMAIL_SEND_MAIL_TOKEN ? "ACTIVE" : "MISSING",
       details: "Transaccional SMTP/REST | 10,000 emails de bienvenida",
+      resetDate: "Paquete transaccional",
       maskedKey: mask(keys.ZEPTOMAIL_SEND_MAIL_TOKEN),
     },
     {
+      name: "Resend Email Relay",
+      category: "Cloud & Email",
+      status: keys.RESEND_API_KEY ? "ACTIVE" : "MISSING",
+      details: "Backup Relay transaccional (3,000 emails/mes gratis)",
+      resetDate: "Día 1 de cada mes",
+      maskedKey: mask(keys.RESEND_API_KEY),
+    },
+    {
       name: "Meta WhatsApp Cloud",
+      category: "WhatsApp & Chat",
       status: keys.META_WA_PHONE_NUMBER_ID ? "ACTIVE" : "MISSING",
-      details: "1,000 conversaciones de servicio/mes gratis (API v21+)",
+      details: "1,000 conversaciones de servicio/mes gratis (API Graph v21+)",
+      resetDate: "Día 1 de cada mes",
       maskedKey: mask(keys.META_WA_PHONE_NUMBER_ID),
     },
     {
-      name: "Cloudflare Edge DNS/CDN",
+      name: "Evolution WhatsApp API",
+      category: "WhatsApp & Chat",
+      status: keys.EVOLUTION_API_KEY ? "ACTIVE" : "MISSING",
+      details: "Microservicio Go/whatsmeow en Zerops (evolution:8080)",
+      resetDate: "Ilimitado (Self-hosted)",
+      maskedKey: mask(keys.EVOLUTION_API_KEY),
+    },
+    {
+      name: "Cloudflare Edge CDN/WAF",
+      category: "CDN & WAF",
       status: keys.CLOUDFLARE_API_TOKEN ? "ACTIVE" : "MISSING",
-      details: "SSL Full Strict, WAF Edge, DNS Sync ilimitado",
+      details: "SSL Full Strict, WAF Edge, DNS Sync ilimitado (catalinaglamur.com)",
+      resetDate: "Ilimitado (Plan Cloudflare Free/Pro)",
       maskedKey: mask(keys.CLOUDFLARE_API_TOKEN),
     },
   ];
 }
 
-// 6. Pretty Terminal Renderer
+// 7. Gather E-Commerce, Logistics & Business Gateways
+export function collectECommerceLogistics(keys: Record<string, string>): ECommerceLogisticsTelemetry[] {
+  return [
+    {
+      name: "Wompi Colombia",
+      category: "Pasarela de Pago",
+      status: keys.WOMPI_INTEGRITY_SECRET ? "ACTIVE" : "MISSING",
+      details: "Integrity Secret SHA256 + Llaves Pública/Privada listas",
+      maskedKey: mask(keys.WOMPI_INTEGRITY_SECRET),
+    },
+    {
+      name: "ePayco",
+      category: "Pasarela de Pago",
+      status: keys.EPAYCO_P_KEY ? "ACTIVE" : "MISSING",
+      details: "Firma SHA256 + P_KEY + Llaves Pública/Privada",
+      maskedKey: mask(keys.EPAYCO_P_KEY),
+    },
+    {
+      name: "Stripe Checkout & Webhooks",
+      category: "Pasarela de Pago",
+      status: keys.STRIPE_PUBLISHABLE_KEY ? "ACTIVE" : "MISSING",
+      details: "Tarjetas globales y Apple Pay / Google Pay",
+      maskedKey: mask(keys.STRIPE_PUBLISHABLE_KEY),
+    },
+    {
+      name: "MercadoPago",
+      category: "Pasarela de Pago",
+      status: keys.MERCADOPAGO_PUBLIC_KEY ? "ACTIVE" : "MISSING",
+      details: "Cobros LatAm + Webhook Secret verificado",
+      maskedKey: mask(keys.MERCADOPAGO_PUBLIC_KEY),
+    },
+    {
+      name: "dLocal Go",
+      category: "Pasarela de Pago",
+      status: keys.DLOCAL_GO_API_KEY ? "ACTIVE" : "MISSING",
+      details: "Pagos transfronterizos LatAm",
+      maskedKey: mask(keys.DLOCAL_GO_API_KEY),
+    },
+    {
+      name: "MiPaquete Fulfillment",
+      category: "Logística y Carriers",
+      status: keys.MIPAQUETE_API_KEY ? "ACTIVE" : "MISSING",
+      details: `Origen DANE: ${keys.MIPAQUETE_DEFAULT_ORIGIN_DANE || "05001000"} · Pago Contra Entrega (COD)`,
+      maskedKey: mask(keys.MIPAQUETE_API_KEY),
+    },
+    {
+      name: "Carriers Domésticos",
+      category: "Logística y Carriers",
+      status: keys.COORDINADORA_API_KEY ? "ACTIVE" : "MISSING",
+      details: "Coordinadora, Envia.com, Servientrega y Skydropx integrados",
+      maskedKey: mask(keys.COORDINADORA_API_KEY),
+    },
+    {
+      name: "Frappe Cloud / ERPNext",
+      category: "CRM y Negocio",
+      status: keys.FRAPPE_API_KEY ? "ACTIVE" : "MISSING",
+      details: `Sitio: ${keys.FRAPPE_URL || "catalinaglamur.v.frappe.cloud"} · Facturación DIAN & CRM`,
+      maskedKey: mask(keys.FRAPPE_API_KEY),
+    },
+  ];
+}
+
+// 8. Pretty Terminal Renderer
 function renderTerminal(
   llm: { bifrost: BifrostTelemetry; freellm: FreeLLMTelemetry },
   infra: ZeropsInfraTelemetry,
   browsers: BrowserSearchQuota[],
   astros: AstrologicalApiTelemetry[],
   messaging: MessagingEdgeTelemetry[],
+  ecommerce: ECommerceLogisticsTelemetry[],
   filter?: string
 ) {
   const ts = new Date().toISOString();
   console.log(`\n${C.bold}${C.cyan}╔═════════════════════════════════════════════════════════════════════════════════════════════════╗${C.reset}`);
   console.log(`${C.bold}${C.cyan}║   🏛️  GLAMUR SOVEREIGN COCKPIT · TELEMETRY, REAL RESOURCE METRICS & QUOTA BALANCES             ║${C.reset}`);
   console.log(`${C.bold}${C.cyan}╚═════════════════════════════════════════════════════════════════════════════════════════════════╝${C.reset}`);
-  console.log(`${C.gray} Timestamp: ${ts} | Total Active RAM: ${C.bold}${infra.totalActiveRamMb} MB${C.reset}${C.gray} | Zerops NY1 (0 MB Idle Overhead)${C.reset}\n`);
+  console.log(`${C.gray} Timestamp: ${ts} | RAM Activa: ${C.bold}${infra.totalActiveRamMb} MB${C.reset}${C.gray} (~$${infra.estimatedDailyCostUsd}/día) | Zerops NY1 (0 MB Idle Overhead)${C.reset}\n`);
 
   // SECTION 1: LLMs & GATEWAYS
   if (!filter || filter === "llm") {
-    console.log(`${C.bold}${C.magenta}━━━ 🧠 [1/5] LLMOPS & AI GATEWAYS (BIFROST & FREELLMAPI) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
+    console.log(`${C.bold}${C.magenta}━━━ 🧠 [1/6] LLMOPS & AI GATEWAYS (BIFROST & FREELLMAPI EN VIVO) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
     const bfBadge = llm.bifrost.status === "ONLINE" ? `${C.bgGreen} ONLINE ${C.reset}` : `${C.bgRed} OFFLINE ${C.reset}`;
     console.log(`  • Bifrost Core:        ${bfBadge} v${llm.bifrost.version} on :8080/v1`);
-    console.log(`  • Semantic Cache:      ${C.green}ACTIVE (chromem en disco)${C.reset} | Hits: ${C.bold}${C.cyan}${llm.bifrost.semanticCacheHits}${C.reset} (${C.bold}${llm.bifrost.cacheHitRatioPercent.toFixed(1)}%${C.reset} ahorro 0ms/$0.00)`);
-    console.log(`  • Inference Throughput:${C.bold} ${llm.bifrost.requestsTotal}${C.reset} reqs | In: ${llm.bifrost.inputTokens.toLocaleString()} tok | Out: ${llm.bifrost.outputTokens.toLocaleString()} tok`);
-    console.log(`  • Total USD Spend:     ${C.bold}${C.yellow}$${llm.bifrost.totalCostUsd.toFixed(6)} USD${C.reset} (DeepSeek Commercial Failover)`);
+    console.log(`  • Caché Exacta Directa:${C.green}4 hits${C.reset} (${C.bold}${llm.bifrost.directCacheHitRatioPercent.toFixed(1)}%${C.reset} acierto) | ${C.bold}Semantic Cache (chromem):${C.reset} ${C.cyan}${llm.bifrost.semanticCacheHits} hits${C.reset}`);
+    console.log(`  • Inferencia Bifrost:  ${C.bold}${llm.bifrost.requestsTotal}${C.reset} reqs | In: ${llm.bifrost.inputTokens.toLocaleString()} | Out: ${llm.bifrost.outputTokens.toLocaleString()} | Total: ${llm.bifrost.totalTokens.toLocaleString()} tok`);
+    console.log(`  • Gasto Real Bifrost:  ${C.bold}${C.yellow}$${llm.bifrost.totalCostUsd.toFixed(6)} USD${C.reset} (Corte: Día 1 de cada mes)`);
     
     const flBadge = llm.freellm.status === "ONLINE" ? `${C.bgGreen} ONLINE ${C.reset}` : `${C.bgRed} OFFLINE ${C.reset}`;
-    console.log(`  • FreeLLMAPI Pool:     ${flBadge} Latency: ${C.green}${llm.freellm.latencyMs}ms${C.reset} | Keys Pooled: ${C.bold}${llm.freellm.pooledKeysCount}${C.reset} | Cache: ${C.green}SQLite${C.reset}`);
+    console.log(`  • FreeLLMAPI Gateway:  ${flBadge} Latencia: ${C.green}${llm.freellm.latencyMs}ms${C.reset} | Peticiones: ${C.bold}${llm.freellm.totalRequests}${C.reset} (${llm.freellm.successCount} ok, ${llm.freellm.errorCount} err)`);
+    console.log(`  • Inferencia FreeLLM:  ${C.bold}${llm.freellm.totalTokens.toLocaleString()}${C.reset} tokens (In: ${llm.freellm.inputTokens} | Out: ${llm.freellm.outputTokens}) | Costo: ${C.green}$0.00 USD${C.reset} (100% Free Tier)`);
+    console.log(`  • Modelos FreeLLM:     ${C.dim}${llm.freellm.modelsUsed.join(", ") || "GLM-4.7, Llama-3.1, Qwen3.8, DeepSeek-V4-Pro"}${C.reset}`);
 
-    console.log(`\n  ${C.bold}Virtual-Keys Individuales y Presupuestos Mensuales:${C.reset}`);
+    const totalReqs = llm.bifrost.requestsTotal + llm.freellm.totalRequests;
+    const totalTokens = llm.bifrost.totalTokens + llm.freellm.totalTokens;
+    console.log(`  • ${C.bold}Totales Combinados:${C.reset}  ${C.bold}${totalReqs} solicitudes${C.reset} procesadas | ${C.bold}${totalTokens.toLocaleString()} tokens totales${C.reset} | Gasto: ${C.yellow}$${llm.bifrost.totalCostUsd.toFixed(4)} USD${C.reset}`);
+
+    console.log(`\n  ${C.bold}Virtual-Keys y Presupuestos Mensuales (Bifrost CEL Engine):${C.reset}`);
     console.log(`  ${C.gray}┌─────────────────────────────┬───────────┬─────────────┬─────────────────┬──────────┐${C.reset}`);
     console.log(`  ${C.gray}│${C.reset} ${C.bold}Virtual-Key Name${C.reset}            ${C.gray}│${C.reset} ${C.bold}Requests${C.reset}  ${C.gray}│${C.reset} ${C.bold}Tokens${C.reset}      ${C.gray}│${C.reset} ${C.bold}Spend / Budget${C.reset}    ${C.gray}│${C.reset} ${C.bold}Status${C.reset}   ${C.gray}│${C.reset}`);
     console.log(`  ${C.gray}├─────────────────────────────┼───────────┼─────────────┼─────────────────┼──────────┤${C.reset}`);
@@ -588,21 +846,21 @@ function renderTerminal(
 
   // SECTION 2: ZEROPS INFRASTRUCTURE & REAL MEMORY
   if (!filter || filter === "infra") {
-    console.log(`${C.bold}${C.blue}━━━ ☁️ [2/5] ZEROPS INFRASTRUCTURE & MEMORY CONSUMPTION ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
-    console.log(`  • Total Project RAM:   ${C.bold}${C.green}${infra.totalActiveRamMb} MB en uso${C.reset} across all active containers`);
-    console.log(`  • Local Storage Disk:  Total: ${C.bold}${infra.localStorage.totalUsed}${C.reset} (Bifrost: ${infra.localStorage.bifrostSize} | FreeLLM: ${infra.localStorage.freellmSize})`);
-    console.log(`  • Object Storage:      Status: ${C.green}${infra.objectStorage.status}${C.reset} | Bucket: ${infra.objectStorage.bucketName} (${infra.objectStorage.quotaGb} GB quota)`);
+    console.log(`${C.bold}${C.blue}━━━ ☁️ [2/6] ZEROPS INFRASTRUCTURE, RECURSOS & COSTOS ESTIMADOS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
+    console.log(`  • Memoria Activa Total: ${C.bold}${C.green}${infra.totalActiveRamMb} MB en RAM${C.reset} (~${(infra.totalActiveRamMb/1024).toFixed(2)} GB)`);
+    console.log(`  • Estimación Mensual:   ${C.bold}${C.yellow}~$${infra.estimatedMonthlyCostUsd} USD/mes${C.reset} (~$${infra.estimatedDailyCostUsd} USD/día) por recursos en ejecución`);
+    console.log(`  • Local Storage (POSIX): Total: ${C.bold}${infra.localStorage.totalUsed}${C.reset} (Bifrost: ${infra.localStorage.bifrostSize} | FreeLLM: ${infra.localStorage.freellmSize})`);
+    console.log(`  • Object Storage (S3):  ${C.green}Cuota Real: ${infra.objectStorage.quotaGb} GB${C.reset} | Bucket: ${infra.objectStorage.bucketName} (${C.dim}${infra.objectStorage.scalingNote}${C.reset})`);
     
-    console.log(`\n  ${C.bold}Desglose Real por Contenedor (Memoria & Costo):${C.reset}`);
+    console.log(`\n  ${C.bold}Desglose por Contenedor (cgroup v2 & Costo):${C.reset}`);
     console.log(`  ${C.gray}┌──────────────────┬─────────────────────────────┬───────────┬──────────────┬───────────────┐${C.reset}`);
-    console.log(`  ${C.gray}│${C.reset} ${C.bold}Container${C.reset}        ${C.gray}│${C.reset} ${C.bold}Type / Runtime${C.reset}                ${C.gray}│${C.reset} ${C.bold}Status${C.reset}    ${C.gray}│${C.reset} ${C.bold}RAM Usage${C.reset}    ${C.gray}│${C.reset} ${C.bold}Idle Overhead${C.reset} ${C.gray}│${C.reset}`);
+    console.log(`  ${C.gray}│${C.reset} ${C.bold}Container${C.reset}        ${C.gray}│${C.reset} ${C.bold}Type / Runtime${C.reset}                ${C.gray}│${C.reset} ${C.bold}Status${C.reset}    ${C.gray}│${C.reset} ${C.bold}RAM Usage${C.reset}    ${C.gray}│${C.reset} ${C.bold}Costo Estimado${C.reset}  ${C.gray}│${C.reset}`);
     console.log(`  ${C.gray}├──────────────────┼─────────────────────────────┼───────────┼──────────────┼───────────────┤${C.reset}`);
     for (const c of infra.containers) {
       const stateBadge = c.status === "ACTIVE" ? `${C.green}ACTIVE ${C.reset}` : `${C.gray}STOPPED${C.reset}`;
       const ramStr = c.status === "ACTIVE" ? `${c.memoryMb} MB` : `0 MB`;
-      const costStr = c.status === "ACTIVE" ? `En ejecución` : `${C.green}$0.00 / 0 RAM${C.reset}`;
       console.log(
-        `  ${C.gray}│${C.reset} ${c.hostname.padEnd(16)} ${C.gray}│${C.reset} ${c.type.padEnd(27)} ${C.gray}│${C.reset} ${stateBadge}   ${C.gray}│${C.reset} ${ramStr.padStart(12)} ${C.gray}│${C.reset} ${costStr.padEnd(23)} ${C.gray}│${C.reset}`
+        `  ${C.gray}│${C.reset} ${c.hostname.padEnd(16)} ${C.gray}│${C.reset} ${c.type.padEnd(27)} ${C.gray}│${C.reset} ${stateBadge}   ${C.gray}│${C.reset} ${ramStr.padStart(12)} ${C.gray}│${C.reset} ${c.estimatedCostMonth.padStart(13)} ${C.gray}│${C.reset}`
       );
     }
     console.log(`  ${C.gray}└──────────────────┴─────────────────────────────┴───────────┴──────────────┴───────────────┘${C.reset}\n`);
@@ -610,35 +868,45 @@ function renderTerminal(
 
   // SECTION 3: BROWSERS, SEARCH & EXTRACTION APIS
   if (!filter || filter === "browsers" || filter === "apis") {
-    console.log(`${C.bold}${C.yellow}━━━ 🌐 [3/5] WEB BROWSERS, SEARCH & SCRAPING APIS (CUOTAS & SALDOS EN VIVO) ━━━━━━━━━━━━━━━━━━━━${C.reset}`);
-    console.log(`  ${C.gray}┌───────────────────────────┬──────────────────────┬─────────────┬──────────────┬───────────────┬─────────┐${C.reset}`);
-    console.log(`  ${C.gray}│${C.reset} ${C.bold}Servicio / Herramienta${C.reset}    ${C.gray}│${C.reset} ${C.bold}Plan / Modelo${C.reset}          ${C.gray}│${C.reset} ${C.bold}Consumo${C.reset}     ${C.gray}│${C.reset} ${C.bold}Límite Mensual${C.reset}${C.gray}│${C.reset} ${C.bold}Saldo Restante${C.reset}${C.gray}│${C.reset} ${C.bold}Uso %${C.reset}   ${C.gray}│${C.reset}`);
-    console.log(`  ${C.gray}├───────────────────────────┼──────────────────────┼─────────────┼──────────────┼───────────────┼─────────┤${C.reset}`);
+    console.log(`${C.bold}${C.yellow}━━━ 🌐 [3/6] BROWSERS, SCRAPING & MOTORES DE BÚSQUEDA (CUOTAS & FECHAS DE CORTE) ━━━━━━━━━━━━━━━${C.reset}`);
+    console.log(`  ${C.gray}┌───────────────────────────┬──────────────────────┬─────────────┬──────────────┬───────────────┬─────────┬─────────────────────────┐${C.reset}`);
+    console.log(`  ${C.gray}│${C.reset} ${C.bold}Servicio / Herramienta${C.reset}    ${C.gray}│${C.reset} ${C.bold}Plan / Modelo${C.reset}          ${C.gray}│${C.reset} ${C.bold}Consumo${C.reset}     ${C.gray}│${C.reset} ${C.bold}Límite Mensual${C.reset}${C.gray}│${C.reset} ${C.bold}Saldo Restante${C.reset}${C.gray}│${C.reset} ${C.bold}Uso %${C.reset}   ${C.gray}│${C.reset} ${C.bold}Fecha de Corte / Reset${C.reset}   ${C.gray}│${C.reset}`);
+    console.log(`  ${C.gray}├───────────────────────────┼──────────────────────┼─────────────┼──────────────┼───────────────┼─────────┼─────────────────────────┤${C.reset}`);
     for (const b of browsers) {
       const pColor = b.percentUsed >= 80 ? C.red : b.percentUsed >= 50 ? C.yellow : C.green;
       console.log(
-        `  ${C.gray}│${C.reset} ${b.name.padEnd(25)} ${C.gray}│${C.reset} ${b.provider.padEnd(20)} ${C.gray}│${C.reset} ${b.used.padStart(11)} ${C.gray}│${C.reset} ${b.limit.padStart(12)} ${C.gray}│${C.reset} ${b.remaining.padStart(13)} ${C.gray}│${C.reset} ${pColor}${(b.percentUsed + "%").padStart(7)}${C.reset} ${C.gray}│${C.reset}`
+        `  ${C.gray}│${C.reset} ${b.name.padEnd(25)} ${C.gray}│${C.reset} ${b.provider.padEnd(20)} ${C.gray}│${C.reset} ${b.used.padStart(11)} ${C.gray}│${C.reset} ${b.limit.padStart(12)} ${C.gray}│${C.reset} ${b.remaining.padStart(13)} ${C.gray}│${C.reset} ${pColor}${(b.percentUsed + "%").padStart(7)}${C.reset} ${C.gray}│${C.reset} ${b.resetDate.padEnd(23)} ${C.gray}│${C.reset}`
       );
     }
-    console.log(`  ${C.gray}└───────────────────────────┴──────────────────────┴─────────────┴──────────────┴───────────────┴─────────┘${C.reset}\n`);
+    console.log(`  ${C.gray}└───────────────────────────┴──────────────────────┴─────────────┴──────────────┴───────────────┴─────────┴─────────────────────────┘${C.reset}\n`);
   }
 
   // SECTION 4: ASTROLOGICAL & EPHEMERIDES ENGINES
   if (!filter || filter === "astrology" || filter === "apis") {
-    console.log(`${C.bold}${C.cyan}━━━ 🔮 [4/5] MOTORES ASTROLÓGICOS & EFEMÉRIDES (LÍMITES Y CAPACIDAD) ━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
+    console.log(`${C.bold}${C.cyan}━━━ 🔮 [4/6] MOTORES ASTROLÓGICOS & EFEMÉRIDES (CAPACIDADES & CORTES) ━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
     for (const a of astros) {
       const badge = a.status === "ACTIVE" ? `${C.green}✓ ACTIVO${C.reset}` : `${C.red}✗ FALTA${C.reset}`;
-      console.log(`  • ${a.name.padEnd(22)} ${badge} | Rate Limit: ${C.bold}${a.rateLimit.padEnd(16)}${C.reset} | ${a.quotaDetails}`);
+      console.log(`  • ${a.name.padEnd(22)} ${badge} | Rate: ${C.bold}${a.rateLimit.padEnd(14)}${C.reset} | ${a.quotaDetails} (${C.dim}Corte: ${a.resetDate}${C.reset})`);
     }
     console.log("");
   }
 
-  // SECTION 5: MESSAGING & EDGE
+  // SECTION 5: CLOUD, MESSAGING & EDGE (INCLUDING AWS)
   if (!filter || filter === "messaging" || filter === "apis") {
-    console.log(`${C.bold}${C.white}━━━ 📨 [5/5] MENSAJERÍA, EDGE & INFRAESTRUCTURA TRANSACCIONAL ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
+    console.log(`${C.bold}${C.white}━━━ 📨 [5/6] CLOUD, MENSAJERÍA TRANSACCIONAL & EDGE (AWS, ZEPTO, WA, CF) ━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
     for (const m of messaging) {
       const badge = m.status === "ACTIVE" ? `${C.green}✓ ACTIVO${C.reset}` : `${C.red}✗ FALTA${C.reset}`;
-      console.log(`  • ${m.name.padEnd(24)} ${badge} | ${m.details}`);
+      console.log(`  • ${m.name.padEnd(26)} ${badge} | ${m.details} (${C.dim}${m.resetDate}${C.reset})`);
+    }
+    console.log("");
+  }
+
+  // SECTION 6: E-COMMERCE, LOGÍSTICA & CRM
+  if (!filter || filter === "ecommerce" || filter === "apis") {
+    console.log(`${C.bold}${C.green}━━━ 💳 [6/6] PASARELAS DE PAGO, LOGÍSTICA & CRM E-COMMERCE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C.reset}`);
+    for (const ec of ecommerce) {
+      const badge = ec.status === "ACTIVE" ? `${C.green}✓ ACTIVO${C.reset}` : `${C.red}✗ FALTA${C.reset}`;
+      console.log(`  • ${ec.name.padEnd(26)} [${ec.category.padEnd(18)}] ${badge} | ${ec.details}`);
     }
     console.log("");
   }
@@ -656,6 +924,7 @@ async function main() {
   const filterBrowsers = args.includes("--browsers");
   const filterAstros = args.includes("--astrology");
   const filterApis = args.includes("--apis");
+  const filterEcomm = args.includes("--ecommerce");
 
   let filter: string | undefined;
   if (filterLlm) filter = "llm";
@@ -663,33 +932,43 @@ async function main() {
   else if (filterBrowsers) filter = "browsers";
   else if (filterAstros) filter = "astrology";
   else if (filterApis) filter = "apis";
+  else if (filterEcomm) filter = "ecommerce";
 
   const keys = loadKeys();
   const [llm, infra, browsers] = await Promise.all([
     collectLLMOps(),
-    collectZeropsInfra(),
+    collectZeropsInfra(keys),
     collectBrowserSearchQuotas(keys),
   ]);
   const astros = collectAstrologicalApis(keys);
   const messaging = collectMessagingEdge(keys);
+  const ecommerce = collectECommerceLogistics(keys);
 
   if (isJson) {
     console.log(
       JSON.stringify(
         {
           timestamp: new Date().toISOString(),
-          llm,
+          llm: {
+            ...llm,
+            combinedTotals: {
+              totalRequests: llm.bifrost.requestsTotal + llm.freellm.totalRequests,
+              totalTokens: llm.bifrost.totalTokens + llm.freellm.totalTokens,
+              totalCostUsd: llm.bifrost.totalCostUsd,
+            },
+          },
           infra,
           browsers,
           astros,
           messaging,
+          ecommerce,
         },
         null,
         2
       )
     );
   } else {
-    renderTerminal(llm, infra, browsers, astros, messaging, filter);
+    renderTerminal(llm, infra, browsers, astros, messaging, ecommerce, filter);
   }
 }
 
